@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: fpl_project
+Version: 0.1.0
+Summary: Projekt do analizy danych FPL
+Requires-Python: >=3.9
+Requires-Dist: pandas
+Requires-Dist: streamlit
+Requires-Dist: python-dotenv
+Requires-Dist: fastparquet
