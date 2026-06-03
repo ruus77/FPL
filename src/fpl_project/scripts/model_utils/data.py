@@ -41,12 +41,15 @@ class FPLDataPipe:
         ])
 
         preprocessor = ColumnTransformer([
-            ("num", num_transform, self.num_cols),
-            ("col", cols_transform, self.cat_cols)],
+            ("col", cols_transform, self.cat_cols),
+            ("num", num_transform, self.num_cols)
+
+        ],
             remainder="drop")
 
         preprocessor.set_output(transform="pandas")
         return preprocessor
+
 
     @staticmethod
     def _to_tensor(X, y):
