@@ -23,6 +23,23 @@ def train_test_split(df: pd.DataFrame)->dict[str, pd.DataFrame | pd.Series]:
     }
 
 
+def scale_target(splits: dict[str, pd.DataFrame | pd.Series]) -> tuple[dict[str, pd.DataFrame | pd.Series], MinMaxScaler]:
+    splits = splits.copy()
+    scaler = MinMaxScaler()
+    
+    scaled_train = scaler.fit_transform(splits["y_train"].values.reshape(-1, 1))
+    
+    splits["y_train"] = pd.Series(scaled_train.flatten(), index=splits["y_train"].index)
+    
+    for key in ["y_valid", "y_test"]:
+        if key in splits:
+            y_reshaped = splits[key].values.reshape(-1, 1)
+            scaled_val = scaler.transform(y_reshaped)
+            splits[key] = pd.Series(scaled_val.flatten(), index=splits[key].index)
+            
+    return splits, scaler
+
+
 class FPLDataPipe:
     def __init__(self, num_cols: list[str], cat_cols: list[str], batch_size: int = 64):
         self.num_cols = num_cols

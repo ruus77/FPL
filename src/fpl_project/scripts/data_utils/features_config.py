@@ -31,6 +31,8 @@ FEATURES_GROUP = {
  'goals_conceded',
  'creativity',
  'xg_conceded',
+ 'pca_cluster',
+ 'dist_to_centroid',
  'red_cards'],
 
 "pre_game_cols" : ["name", "position", "element", "was_home", "was_home", "gw", "code", "season", "kickoff_time", "value", "selected", "transfers_in", "transfers_out", "transfers_balance", "transfers_trend"]
