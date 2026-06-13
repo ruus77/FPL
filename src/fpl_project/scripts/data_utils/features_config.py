@@ -1,3 +1,39 @@
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class FeaturesConfig:
+    target: list = field(default_factory=lambda: ["total_points"])
+
+    id_cols: list = field(default_factory=lambda: ["name", "element", "kickoff_time", "gw", "code", "season"])
+
+    static_cols: list = field(default_factory=lambda: ["position", "was_home", "starts"])
+
+    fpl_cols: list = field(default_factory=lambda: [
+        'bonus', 'bps', 'ict_index', 'influence',
+        'value', 'threat', 'selected', 'transfers_out',
+        'transfers_balance', 'transfers_in', "transfers_trend"
+    ])
+
+    perf_cols: list = field(default_factory=lambda: [
+        'goals_scored', 'assists', 'own_goals', 'penalties_missed',
+        'xg', 'xa', 'xg_per_90', 'xa_per_90',
+        'xg_involvements', 'xg_involvements_per_90',
+        'goals_conceded', 'xg_conceded', 'xg_conceded_per_90',
+        'clean_sheets', 'saves', 'penalties_saved',
+        'minutes', 'yellow_cards', 'red_cards',
+        'creativity',
+        'team_h_score', 'team_a_score',
+        'pca_cluster', 'dist_to_centroid', 'xp'
+    ])
+
+    pre_game_cols: list = field(default_factory=lambda: [
+        "name", "position", "element", "was_home", "was_home",
+        "gw", "code", "season", "kickoff_time", "value", "selected",
+        "transfers_in", "transfers_out", "transfers_balance", "transfers_trend"
+    ])
+
+
+
 FEATURES_GROUP = {
 
 "target" : ["total_points"],
