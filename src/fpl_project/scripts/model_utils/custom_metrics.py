@@ -12,7 +12,7 @@ class BaseMetric(Metric):
         value_idx:   indeks kolumny 'value' w wymiarze cech
         model_type:  'mlp'    → X: (B, F)
                      'lstm'   → X: (B, T, F)
-                     'conv1d' → X: (B, F, T)
+                     'conv1d' → X: (B, T, F)
         """
         super().__init__()
         assert model_type in ("mlp", "lstm", "conv1d"), f"Nieznany model_type: {model_type}"
@@ -31,11 +31,9 @@ class BaseMetric(Metric):
 
     def _get_price(self, x: torch.Tensor) -> torch.Tensor:
         if self.model_type == "mlp":
-            return x[:, self.value_idx]          # (B, F)
-        elif self.model_type == "lstm":
-            return x[:, -1, self.value_idx]      # (B, T, F) — ostatni timestep
-        elif self.model_type == "conv1d":
-            return x[:, self.value_idx, -1]      # (B, F, T) — ostatni timestep
+            return x[:, self.value_idx]
+        elif self.model_type in ["lstm", "conv1d"]:
+            return x[:, -1, self.value_idx]
 
     def _apply_masks(self, price: torch.Tensor):
         return (
@@ -76,9 +74,9 @@ class CustomMAE(BaseMetric):
         price = self._get_price(x)
         err   = torch.abs(preds - target)
         b, m, p = self._apply_masks(price)
-        if b.any(): self.err_sum_b += err[b].sum(); self.n_b += b.sum()
-        if m.any(): self.err_sum_m += err[m].sum(); self.n_m += m.sum()
-        if p.any(): self.err_sum_p += err[p].sum(); self.n_p += p.sum()
+        if b.any(): self.err_sum_b += err[b].sum(); self.n_b += b.sum().float()
+        if m.any(): self.err_sum_m += err[m].sum(); self.n_m += m.sum().float()
+        if p.any(): self.err_sum_p += err[p].sum(); self.n_p += p.sum().float()
 
     def compute(self) -> dict[str, torch.Tensor]:
         return {
