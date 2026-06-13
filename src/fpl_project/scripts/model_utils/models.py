@@ -72,8 +72,8 @@ class Conv1DRegressor(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mask = self.feature_selection.view(1, -1, 1)
-        x = x * mask
+        x = x * self.feature_selection
+        x = x.transpose(1, 2)
         
         out = self.input_proj(x)
         
@@ -130,3 +130,49 @@ class LSTMRegressor(nn.Module):
             h_last = h_n[-1]
 
         return self.head(h_last)
+
+class FPLLoss(nn.Module):
+    def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,
+                 model_type: str = "mlp",
+                 w_premium: float = 3.0, under_predict_penalty: float = 1.5):
+        super().__init__()
+        self.p_low = p_low
+        self.p_high = p_high
+        self.value_idx = value_idx
+        self.minutes_idx = minutes_idx
+        self.model_type = model_type
+
+        self.w_premium = w_premium
+        self.under_predict_penalty = under_predict_penalty
+
+        # 'none' pozwala wyciągnąć wektor błędów dla każdej próbki osobno
+        self.mse = nn.MSELoss(reduction='none')
+
+    def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
+        """Pobiera cechę z wektora X w zależności od typu modelu."""
+        if self.model_type == "mlp":
+            return x[:, idx]
+        elif self.model_type in ["lstm", "conv1d"]:
+            return x[:, -1, idx]
+        else:
+            raise ValueError(f"Nieznany model_type: {self.model_type}")
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        y_pred = y_pred.flatten()
+        y_true = y_true.flatten()
+
+        price = self._get_feature(x, self.value_idx)
+        minutes = self._get_feature(x, self.minutes_idx)
+
+        base_loss = self.mse(y_pred, y_true)
+
+        p_mask = price >= self.p_high
+        price_weights = torch.ones_like(base_loss)
+        price_weights[p_mask] = self.w_premium
+
+        under_predicted = y_true > y_pred
+        price_weights[under_predicted & p_mask] *= self.under_predict_penalty
+
+        final_loss = base_loss * price_weights * (minutes + 0.1)
+
+        return final_loss.sum()
