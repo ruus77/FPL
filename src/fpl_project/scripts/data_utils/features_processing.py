@@ -1,5 +1,6 @@
 import pandas as pd
-from fpl_project.scripts.data_utils.features_config import FEATURES_GROUP
+from fpl_project.scripts.data_utils.features_config import FEATURES_GROUP, FeaturesConfig
+
 
 def sort_data(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(by=["code", "kickoff_time", "season", "gw"]).reset_index(drop=True)
@@ -8,14 +9,15 @@ def sort_data(df: pd.DataFrame) -> pd.DataFrame:
 class FeatureEngineer:
     def __init__(self, df: pd.DataFrame):
         self.df = df
-        self.cols_map = FEATURES_GROUP
+        self.cols_map: FeaturesConfig = FeaturesConfig()
 
     def ema(self, window_size: int = 4) -> tuple[pd.DataFrame, list[str]]:
         df = self.df.copy()
         if self.cols_map is None:
             return pd.DataFrame(), []
 
-        ema_features = self.cols_map["fpl_cols"] + self.cols_map["perf_cols"] + self.cols_map["target"]
+        ema_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+        ema_features = [col for col in ema_features if col in df.columns]
 
         df = sort_data(df)
 
@@ -33,7 +35,8 @@ class FeatureEngineer:
         if self.cols_map is None:
             return pd.DataFrame(), []
 
-        lag_features = self.cols_map["fpl_cols"] + self.cols_map["perf_cols"] + self.cols_map["target"]
+        lag_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+        lag_features = [col for col in lag_features if col in df.columns]
 
         df = sort_data(df)
 
@@ -52,11 +55,9 @@ class FeatureEngineer:
         if self.cols_map is None:
             return pd.DataFrame(), []
 
-        std_features = (
-                self.cols_map["fpl_cols"] +
-                self.cols_map["perf_cols"] +
-                self.cols_map["target"]
-        )
+        std_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+
+        std_features = [col for col in std_features if col in df.columns]
 
         df = sort_data(df)
 
@@ -117,12 +118,16 @@ class FeatureEngineer:
 
             df_std = pd.concat(std_frames, axis=1)
 
-        pre_game_cols = (
-                list(set(self.cols_map.get("pre_game_cols", [])))
-                + self.cols_map.get("target", [])
-        )
+        # Ensure we have lists
+        pre_game_cols = []
+        if getattr(self.cols_map, 'pre_game_cols', None) is not None:
+            pre_game_cols = list(set(self.cols_map.pre_game_cols))
 
-        return pd.concat(
-            [df[pre_game_cols], df_ema, df_lag, df_std],
-            axis=1
-        ).fillna(0)
+        target_cols = []
+        if getattr(self.cols_map, 'target', None) is not None:
+            target_cols = list(set(self.cols_map.target))
+
+        pre_game_cols = pre_game_cols + target_cols
+        pre_game_cols = [col for col in pre_game_cols if col in df.columns]
+
+        return pd.concat([df[pre_game_cols], df_ema, df_lag, df_std], axis=1).fillna(0)
