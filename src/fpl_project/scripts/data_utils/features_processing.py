@@ -1,5 +1,5 @@
 import pandas as pd
-from fpl_project.scripts.data_utils.features_config import FEATURES_GROUP, FeaturesConfig
+from fpl_project.scripts.data_utils.features_config import FeaturesConfig
 
 
 def sort_data(df: pd.DataFrame) -> pd.DataFrame:

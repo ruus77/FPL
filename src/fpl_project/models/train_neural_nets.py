@@ -31,11 +31,11 @@ print(f"Device: {device}")
 @dataclass
 class TrainingHyperparameters:
     seq_len: int = 8
-    batch_size: int = 64
+    batch_size: int = 128
     lr: float = 0.0001
     weight_decay: float = 0.05
-    num_epochs: int = 300
-    patience: int = 100
+    num_epochs: int = 150
+    patience: int = 50
     loss_fn: nn.Module = field(default_factory=MSELoss)
 
 class ModelConfig(NamedTuple):
@@ -61,7 +61,7 @@ data_splits_seq = train_test_split(data_seq)
 data_splits, target_scaler = scale_target(data_splits)
 data_splits_seq, target_scaler_seq = scale_target(data_splits_seq)
 
-ignored_num = {"name", "position", "element", "opponent_team", "gw", "code", "season", "kickoff_time"}
+ignored_num = {"name", "position", "element", "opponent_team", "gw", "code", "season", "kickoff_time", "team"}
 ignored_cat = {"web_name", "player_id", "gw"}
 data_cols_set = set(data.columns)
 
@@ -115,20 +115,20 @@ def calculate_scaled_bounds(dataloader: torch.utils.data.DataLoader, value_idx: 
 
 
 MODEL_REGISTRY = {
-    #mlp.__class__.__name__: ModelConfig(mlp, train_dl_mlp,
-    #                                    valid_dl_mlp, value_idx_mlp,
-    #                                    minutes_idx_mlp, "mlp",
-    #                                    data.shape[1], target_scaler),
+    mlp.__class__.__name__: ModelConfig(mlp, train_dl_mlp,
+                                        valid_dl_mlp, value_idx_mlp,
+                                        minutes_idx_mlp, "mlp",
+                                        data.shape[1], target_scaler),
 
-    conv1d_model.__class__.__name__: ModelConfig(conv1d_model, train_dl_seq,
-                                                 valid_dl_seq, value_idx_seq,
-                                                 minutes_idx_seq, "conv1d",
-                                                 data_seq.shape[1], target_scaler_seq),
+    #conv1d_model.__class__.__name__: ModelConfig(conv1d_model, train_dl_seq,
+    #                                             valid_dl_seq, value_idx_seq,
+    #                                             minutes_idx_seq, "conv1d",
+    #                                             data_seq.shape[1], target_scaler_seq),
 
-    lstm_model.__class__.__name__: ModelConfig(lstm_model, train_dl_seq,
-                                               valid_dl_seq, value_idx_seq,
-                                               minutes_idx_seq, "lstm",
-                                               data_seq.shape[1], target_scaler_seq)
+    #lstm_model.__class__.__name__: ModelConfig(lstm_model, train_dl_seq,
+    #                                           valid_dl_seq, value_idx_seq,
+    #                                           minutes_idx_seq, "lstm",
+    #                                           data_seq.shape[1], target_scaler_seq)
 }
 # setup <- (model, train_dl, valid_dl, value_idx, minutes_idx, model_type, num_features, scaler)
 

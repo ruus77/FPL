@@ -4,76 +4,45 @@ from dataclasses import dataclass, field
 class FeaturesConfig:
     target: list = field(default_factory=lambda: ["total_points"])
 
-    id_cols: list = field(default_factory=lambda: ["name", "element", "kickoff_time", "gw", "code", "season"])
+    id_cols: list = field(default_factory=lambda: [
+        "name", "element", "code", "season", "gw", "kickoff_time",
+        "team", "opponent_team"
+    ])
 
-    static_cols: list = field(default_factory=lambda: ["position", "was_home", "starts"])
+    static_cols: list = field(default_factory=lambda: [
+        "position", "was_home", "starts"
+    ])
 
     fpl_cols: list = field(default_factory=lambda: [
-        'bonus', 'bps', 'ict_index', 'influence',
-        'value', 'threat', 'selected', 'transfers_out',
-        'transfers_balance', 'transfers_in', "transfers_trend"
+        "bonus", "bps", "ict_index", "influence", "threat", "creativity",
+        "value", "selected", "transfers_in", "transfers_out",
+        "transfers_balance", "transfers_trend"
     ])
 
     perf_cols: list = field(default_factory=lambda: [
-        'goals_scored', 'assists', 'own_goals', 'penalties_missed',
-        'xg', 'xa', 'xg_per_90', 'xa_per_90',
-        'xg_involvements', 'xg_involvements_per_90',
-        'goals_conceded', 'xg_conceded', 'xg_conceded_per_90',
-        'clean_sheets', 'saves', 'penalties_saved',
-        'minutes', 'yellow_cards', 'red_cards',
-        'creativity',
-        'team_h_score', 'team_a_score',
-        'pca_cluster', 'dist_to_centroid', 'xp'
+        "goals_scored", "assists", "own_goals", "penalties_missed",
+        "xg", "xa", "xg_per_90", "xa_per_90",
+        "xg_involvements", "xg_involvements_per_90",
+        "goals_conceded", "xg_conceded", "xg_conceded_per_90",
+        "clean_sheets", "saves", "penalties_saved",
+        "minutes", "yellow_cards", "red_cards",
+        "team_h_score", "team_a_score",
+        "pca_cluster", "dist_to_centroid", "xp",
+        "prob_win", "prob_draw", "prob_lose",
+        "prob_over_2.5", "prob_under_2.5",
+        "elo", "elo_opp", "elo_diff", "fixture_per_90",
+        "prob_win_elo", "player_match_xg_expected", "player_match_xa_expected",
+        "match_value_efficiency", "hype_vs_odds_ratio"
     ])
 
     pre_game_cols: list = field(default_factory=lambda: [
-        "name", "position", "element", "was_home", "was_home",
-        "gw", "code", "season", "kickoff_time", "value", "selected",
-        "transfers_in", "transfers_out", "transfers_balance", "transfers_trend"
+        "name", "element", "code", "season", "gw", "kickoff_time", "team", "opponent_team",
+        "position", "was_home",
+        "value", "selected", "transfers_in", "transfers_out", "transfers_balance", "transfers_trend",
+        "prob_win", "prob_draw", "prob_lose", "prob_over_2.5", "prob_under_2.5",
+        "elo", "elo_opp", "elo_diff", "prob_win_elo", "player_match_xg_expected",
+        "player_match_xa_expected", "match_value_efficiency", "hype_vs_odds_ratio"
     ])
-
-
-
-FEATURES_GROUP = {
-
-"target" : ["total_points"],
-
-"id_cols" : ["name", "element", "kickoff_time", "gw", "code", "season"],
-
-"static_cols" : ["position", "was_home", "starts"],
-
-"fpl_cols" : ['bonus', 'bps', 'ict_index', 'influence', 'value', 'threat',  'selected', 'transfers_out', 'transfers_balance', 'transfers_in', "transfers_trend"],
-
-"perf_cols" : [
- 'yellow_cards',
- 'xg_conceded_per_90',
- 'clean_sheets',
- 'minutes',
- 'xg_involvements_per_90',
- 'xg_per_90',
- 'xa_per_90',
- 'own_goals',
- 'assists',
- 'xg',
- 'saves',
- 'penalties_saved',
- 'xp',
- 'penalties_missed',
- 'goals_scored',
- 'team_h_score',
- 'xa',
- 'xg_involvements',
- 'team_a_score',
- 'goals_conceded',
- 'creativity',
- 'xg_conceded',
- 'pca_cluster',
- 'dist_to_centroid',
- 'red_cards'],
-
-"pre_game_cols" : ["name", "position", "element", "was_home", "was_home", "gw", "code", "season", "kickoff_time", "value", "selected", "transfers_in", "transfers_out", "transfers_balance", "transfers_trend"]
-}
-
 
 
 

@@ -11,8 +11,8 @@ class MLP(nn.Module):
 
         layers = []
         in_dim = input_size
-        self.feature_selection = nn.Parameter(torch.ones(input_size))
-        
+        self.feature_selection = nn.Parameter(torch.ones(input_size) * .01)
+
         for h, dr in zip(hidden_sizes, dropout_rates):
             layers += [nn.Linear(in_dim, h), nn.LayerNorm(h), nn.LeakyReLU(0.01), nn.Dropout(dr)]
             in_dim = h
@@ -20,8 +20,8 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * self.feature_selection
-        
+        x = x * torch.sigmoid(self.feature_selection)
+
         return self.net(x)
 
 
@@ -131,6 +131,7 @@ class LSTMRegressor(nn.Module):
 
         return self.head(h_last)
 
+
 class FPLLoss(nn.Module):
     def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,
                  model_type: str = "mlp",
@@ -145,11 +146,10 @@ class FPLLoss(nn.Module):
         self.w_premium = w_premium
         self.under_predict_penalty = under_predict_penalty
 
-        # 'none' pozwala wyciągnąć wektor błędów dla każdej próbki osobno
+        # Używamy bazowego MSE bez redukcji, aby kontrolować wagi per-sample
         self.mse = nn.MSELoss(reduction='none')
 
     def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
-        """Pobiera cechę z wektora X w zależności od typu modelu."""
         if self.model_type == "mlp":
             return x[:, idx]
         elif self.model_type in ["lstm", "conv1d"]:
@@ -164,15 +164,26 @@ class FPLLoss(nn.Module):
         price = self._get_feature(x, self.value_idx)
         minutes = self._get_feature(x, self.minutes_idx)
 
+        # 1. Bazowy błąd kwadratowy
         base_loss = self.mse(y_pred, y_true)
 
-        p_mask = price >= self.p_high
-        price_weights = torch.ones_like(base_loss)
-        price_weights[p_mask] = self.w_premium
+        # 2. GŁADKA MASKA PREMIUM (zamiast twardego True/False)
+        # Używamy sigmoidy, aby płynnie przechodzić w wagę premium wokół progu p_high
+        # Mnożnik *20 kontroluje stromość przejścia (można dostosować)
+        premium_soft_mask = torch.sigmoid((price - self.p_high) * 20)
+        price_weights = 1.0 + (self.w_premium - 1.0) * premium_soft_mask
 
-        under_predicted = y_true > y_pred
-        price_weights[under_predicted & p_mask] *= self.under_predict_penalty
+        # 3. GŁADKA KARA ZA NIEDOSZACOWANIE (Asymetryczne wygładzenie)
+        # Zamiast twardego `y_true > y_pred`, sprawdzamy różnicę (y_true - y_pred).
+        # Softplus aktywuje się płynnie tylko dla wartości dodatnich (gdy niedoszacujemy).
+        error_diff = y_true - y_pred
+        under_predict_signal = nn.functional.softplus(error_diff, beta=2.0)
+        # Mnożymy wagę premium przez asymetryczną karę, proporcjonalnie do stopnia niedoszacowania
+        asymmetry_weight = 1.0 + (self.under_predict_penalty - 1.0) * (
+                    under_predict_signal / (under_predict_signal + 1.0))
+        price_weights = price_weights * asymmetry_weight
 
+        # 4. Ważenie minutami i finalna ŚREDNIA (Krytyczna poprawka z .mean())
         final_loss = base_loss * price_weights * (minutes + 0.1)
 
-        return final_loss.sum()
+        return final_loss.mean()  # <-- Zmieniono z .sum() na .mean() dla stabilności gradientów

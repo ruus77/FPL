@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="0f8a7b54-a5b6-4934-95fd-e4bd44a1cf6c" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/MLmodel" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/conda.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/data/model.pth" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/python_env.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-23e7367d210a44e5bbd7c76fb5161208/artifacts/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/MLmodel" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/conda.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/data/model.pth" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/python_env.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-4395d57931164ae8886aeb9fd208f606/artifacts/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/MLmodel" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/conda.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/data/model.pth" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/python_env.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlartifacts/16/models/m-95707d3cf7b34b2a8c6fa0e6639b6600/artifacts/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mlflow.db" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/fpl_project/models/best_lstmregressor.pt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/fpl_project/scripts/model_utils/starter_preds.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/FPL.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/FPL.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Data/FPL_historical.parquet" beforeDir="false" afterPath="$PROJECT_DIR$/Data/FPL_historical.parquet" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Data/fpl_data.parquet" beforeDir="false" afterPath="$PROJECT_DIR$/Data/fpl_data.parquet" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Data/fpl_historical.log" beforeDir="false" afterPath="$PROJECT_DIR$/Data/fpl_historical.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Data/tidy_data.parquet" beforeDir="false" afterPath="$PROJECT_DIR$/Data/tidy_data.parquet" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-135cfd76e27346a68015b2e064108687/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-3d923529be474aa5998500bde1fc17fc/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/5/models/m-ef48ef49e06a42cea86ba00af571aeb4/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-0ac669139fa547f1ad487c1194dadfa5/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-2221c2bc81aa4d94b71aac7ca32c0b43/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/MLmodel" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/MLmodel" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/data/model.pth" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/data/model.pth" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/data/pickle_module_info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/mlartifacts/7/models/m-9194950d2bb34cefa227b6eec81e37ad/artifacts/data/pickle_module_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project.egg-info/PKG-INFO" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project.egg-info/PKG-INFO" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project.egg-info/SOURCES.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project.egg-info/SOURCES.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project.egg-info/dependency_links.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project.egg-info/dependency_links.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project.egg-info/requires.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project.egg-info/requires.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project.egg-info/top_level.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project.egg-info/top_level.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/data_processing/data_import.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/data_processing/data_import.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/data_processing/eda.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/data_processing/eda.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/data_processing/features_engineering.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/data_processing/features_engineering.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/models/best_conv1dregressor.pt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/models/best_conv1dregressor.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/models/best_mlp.pt" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/models/best_mlp.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/models/train_neural_nets.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/models/train_neural_nets.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/scripts/data_utils/features_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/scripts/data_utils/features_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/scripts/data_utils/features_processing.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/scripts/data_utils/features_processing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/scripts/model_utils/custom_metrics.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/scripts/model_utils/custom_metrics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/fpl_project/scripts/model_utils/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/fpl_project/scripts/model_utils/models.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="CopilotPersistence">
+    <persistenceIdMap>
+      <entry key="_C:/Users/russa/PycharmProjects/FPL" value="3EUY5Xk7G0J9DItB3ocW9CfZ1bj" />
+      <entry key="_C:/Users/russa/PycharmProjects/FPL/.idea" value="3F4kSx1wQdUILTgpbvY6yb2JnQu" />
+    </persistenceIdMap>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;ruus77&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/ruus77/FPL&quot;,
+    &quot;accountId&quot;: &quot;611823d3-cd80-4e9a-a540-431971a0504a&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="3EUY5Xk7G0J9DItB3ocW9CfZ1bj" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.data_import.executor": "Run",
+    "Python.starter_preds.executor": "Run",
+    "Python.train_neural_nets.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "C:/Users/russa/PycharmProjects/FPL/src/fpl_project/models",
+    "nodejs_package_manager_path": "npm",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\russa\PycharmProjects\FPL\src\fpl_project\models" />
+      <recent name="C:\Users\russa\PycharmProjects\FPL\src\fpl_project\data_processing" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.30387.173" />
+        <option value="bundled-python-sdk-4762d8aabb82-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.30387.173" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="0f8a7b54-a5b6-4934-95fd-e4bd44a1cf6c" name="Changes" comment="" />
+      <created>1780234432484</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1780234432484</updated>
+      <workItem from="1780234433505" duration="8433000" />
+      <workItem from="1780244813914" duration="1277000" />
+      <workItem from="1780302531553" duration="109000" />
+      <workItem from="1780303229904" duration="378000" />
+      <workItem from="1780379713622" duration="518000" />
+      <workItem from="1780944673573" duration="5000" />
+      <workItem from="1781000088469" duration="11001000" />
+      <workItem from="1781198835733" duration="780000" />
+      <workItem from="1781199980348" duration="7683000" />
+      <workItem from="1781333929319" duration="2601000" />
+      <workItem from="1781341733040" duration="687000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="CUSTOM_BOOLEAN_PROPERTIES">
+                <map>
+                  <entry key="Show.Git.Branches" value="true" />
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/fpl_project/data_processing/data_import.py</url>
+          <line>18</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/fpl_project/data_processing/data_import.py</url>
+          <option name="timeStamp" value="2" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/FPL$train_neural_nets.coverage" NAME="train_neural_nets Coverage Results" MODIFIED="1781294156114" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/fpl_project/models" />
+    <SUITE FILE_PATH="coverage/FPL$starter_preds.coverage" NAME="starter_preds Coverage Results" MODIFIED="1781039178517" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/fpl_project/scripts/model_utils" />
+    <SUITE FILE_PATH="coverage/FPL$data_import.coverage" NAME="data_import Coverage Results" MODIFIED="1781201513272" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/fpl_project/data_processing" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
+  </component>
+</project>
