@@ -18,7 +18,7 @@ import sklearn.preprocessing
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
-# --- Inicjalizacja ---
+
 tracker = MlflowTracker()
 tracker.set_tracking()
 set_seed(77)
@@ -137,7 +137,7 @@ for model_name, setup in MODEL_REGISTRY.items():
                                             model_type=setup.model_type)
 
     hipers.loss_fn = FPLLoss(p_low=p_low, p_high=p_high, value_idx=setup.value_idx, minutes_idx=setup.minutes_idx,
-                             model_type=setup.model_type, w_premium=2, under_predict_penalty=3)
+                             model_type=setup.model_type, w_premium=2, under_predict_penalty=3, device=device)
 
     trainer = Trainer(
         device=device,
