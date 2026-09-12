@@ -25,7 +25,20 @@ logger = logging.getLogger(__name__)
 class ContentConfig:
     VAASTAV_GW_URL: str = "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/refs/heads/master/data/{}/gws/gw{}.csv"
     VAASTAV_ID_URL: str = "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/refs/heads/master/data/{}/players_raw.csv"
-    BETTING_URL : str = "https://www.football-data.co.uk/mmz4281/{}/E0.csv"
+    BETTING_URL: str = "https://www.football-data.co.uk/mmz4281/{}/E0.csv"
+    FCI_URL: str = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/refs/heads/main/data/{}/By%20Gameweek/GW{}/{}.csv"
+    FCI_PLAYERSTATS_URL: str = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/refs/heads/main/data/{}/playerstats.csv"
+
+    FCI_TARGET_COLUMNS: list[str] = field(default_factory=lambda: [
+        'name', 'position', 'xP', 'assists', 'bonus', 'bps', 'clean_sheets',
+        'creativity', 'element', 'expected_assists', 'expected_goal_involvements',
+        'expected_goals', 'expected_goals_conceded', 'fixture', 'goals_conceded',
+        'goals_scored', 'ict_index', 'influence', 'kickoff_time', 'minutes',
+        'own_goals', 'penalties_missed', 'penalties_saved', 'red_cards', 'round',
+        'saves', 'selected', 'starts', 'team_a_score', 'team_h_score', 'threat',
+        'event_points', 'transfers_balance_event', 'transfers_in_event',
+        'transfers_out_event', 'value', 'was_home', 'yellow_cards', 'gw', 'code', 'team'
+    ])
 
     SEASONS: list[str] = field(default_factory=lambda: SEASONS)
     BETTING_SEASONS: list[str] = field(
@@ -35,8 +48,7 @@ class ContentConfig:
         'modified', 'mng_clean_sheets', 'mng_draw',
         'mng_goals_scored', 'mng_loss', 'mng_underdog_draw',
         'mng_underdog_win', 'mng_win', 'clearances_blocks_interceptions',
-        'defensive_contribution',   'recoveries',
-        'tackles'])
+        'defensive_contribution', 'recoveries', 'tackles'])
 
 
 class FetchData(ABC):
@@ -44,7 +56,7 @@ class FetchData(ABC):
         self.seasons = seasons
 
     @abstractmethod
-    def _merge_and_clean(self)->pd.DataFrame:
+    def _merge_and_clean(self) -> pd.DataFrame:
         pass
 
     @abstractmethod
@@ -144,7 +156,6 @@ class FetchVaastav(FetchData):
 
         df['kickoff_time'] = pd.to_datetime(kickoff_dt.dt.strftime('%d/%m/%Y'), dayfirst=True)
 
-
         df["season"] = df["season"].apply(
             lambda x: re.sub(r'^20(\d{2})-(\d{2})$', r'\1\2', str(x))
         )
@@ -234,6 +245,129 @@ class FetchVaastav(FetchData):
             logger.info("[Walidacja] Sezon %s: Liczba unikalnych zawodników wynosi %d.", season, count)
 
         logger.info("Zakończono walidację jakości danych.")
+
+
+class FetchFCI(FetchData):
+    """FCI działa tylko dla bieżącego, trwającego sezonu (brak archiwum)."""
+
+    def __init__(self, config_data: ContentConfig):
+        current_season = config_data.SEASONS[-1]
+        super().__init__(seasons=[current_season])
+        self.config = config_data
+        self.current_season = current_season
+        yr1, yr2 = current_season.split("-")
+        self.fci_season_path = f"{yr1}-20{yr2}"  # "2026-27" -> "2026-2027"
+
+    def _get_fci_base(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        try:
+            playerstats_url = self.config.FCI_PLAYERSTATS_URL.format(self.fci_season_path)
+            playerstats = pd.read_csv(playerstats_url, low_memory=False)
+
+            teams_url = playerstats_url.replace("playerstats.csv", "teams.csv")
+            teams_df = pd.read_csv(teams_url, usecols=["id", "code", "name"])
+            teams_df = teams_df.rename(columns={"name": "team", "id": "team_id", "code": "team_code"})
+
+            return playerstats, teams_df
+        except Exception as e:
+            logger.error("Błąd pobierania bazowych danych FCI dla sezonu %s: %s", self.current_season, e)
+            return pd.DataFrame(), pd.DataFrame()
+
+    def _fetch_gameweeks(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        players_frames, matches_frames = [], []
+        skipped = 0
+
+        for gw in range(1, 39):
+            try:
+                url_players = self.config.FCI_URL.format(self.fci_season_path, gw, "players")
+                df_p = pd.read_csv(
+                    url_players, low_memory=False,
+                    usecols=["player_id", "first_name", "second_name", "position", "player_code", "team_code"]
+                )
+                players_frames.append(df_p)
+
+                url_matches = self.config.FCI_URL.format(self.fci_season_path, gw, "matches")
+                df_m = pd.read_csv(
+                    url_matches, low_memory=False,
+                    usecols=["match_id", "gameweek", "kickoff_time", "home_team", "away_team", "home_score", "away_score"]
+                )
+                matches_frames.append(df_m)
+            except Exception:
+                skipped += 1
+
+        if skipped > 0:
+            logger.warning("Pominięto %d plików FCI dla sezonu %s (brak GW lub błąd sieciowy).", skipped, self.current_season)
+
+        if not players_frames or not matches_frames:
+            return pd.DataFrame(), pd.DataFrame()
+
+        players = pd.concat(players_frames, ignore_index=True).drop_duplicates(subset=["player_id"])
+        matches = pd.concat(matches_frames, ignore_index=True)
+        return players, matches
+
+    def _merge_and_clean(self) -> pd.DataFrame:
+        players, matches = self._fetch_gameweeks()
+        playerstats, teams_df = self._get_fci_base()
+
+        if players.empty or matches.empty or playerstats.empty or teams_df.empty:
+            logger.error("Nie można wykonać merge FCI. Jeden ze zbiorów wejściowych jest pusty.")
+            return pd.DataFrame()
+
+        players["name"] = players["first_name"] + " " + players["second_name"]
+        players = players.drop(columns=["first_name", "second_name"])
+        players = pd.merge(players, teams_df, on="team_code", how="left")
+
+        df = pd.merge(playerstats, players, how="left", left_on="id", right_on="player_id")
+        df = pd.merge(df, matches, how="left", left_on="gw", right_on="gameweek")
+
+        df = df[(df["team_id"] == df["home_team"]) | (df["team_id"] == df["away_team"])].copy()
+        df["was_home"] = df["team_id"] == df["home_team"]
+
+        for col in ["transfers_in_event", "transfers_out_event"]:
+            df[col] = df[col].fillna(0)
+        df["transfers_balance_event"] = df["transfers_in_event"] - df["transfers_out_event"]
+
+        df["position"] = df["position"].map({
+            "Defender": "DEF", "Forward": "FWD", "Goalkeeper": "GK", "Midfielder": "MID"
+        })
+
+        df = df[df["match_id"].astype(str).str.contains("prem", na=False)]
+
+        rename_dict = {
+            "id": "element", "ep_this": "xP", "match_id": "fixture", "now_cost": "value",
+            "selected_by_percent": "selected", "home_score": "team_h_score",
+            "away_score": "team_a_score", "player_code": "code",
+        }
+        df = df.rename(columns=rename_dict)
+        df["round"] = df["gw"]
+
+        try:
+            df = df[self.config.FCI_TARGET_COLUMNS].copy()
+        except Exception as e:
+            logger.error("Brak wymaganych kolumn FCI: %s", e)
+            return pd.DataFrame()
+
+        df = df.rename(columns={
+            "transfers_out_event": "transfers_out",
+            "transfers_balance_event": "transfers_balance",
+            "transfers_in_event": "transfers_in",
+            "event_points": "total_points",
+        })
+
+        logger.info("Proces czyszczenia FCI zakończony dla sezonu %s. Wymiary: %d wierszy, %d kolumn.",
+                    self.current_season, *df.shape)
+
+        return df.assign(season=self.current_season)
+
+    def get_data(self) -> pd.DataFrame:
+        logger.info("Rozpoczęto pobieranie danych z FPL-Core-Insights (FCI) dla sezonu %s.", self.current_season)
+        return self._merge_and_clean()
+
+    def run_tests(self, df: pd.DataFrame) -> None:
+        if df.empty:
+            logger.error("[Walidacja FCI] Zbiór danych jest pusty.")
+            return
+        logger.info("[Walidacja FCI] Liczba rekordów: %d, liczba GW: %d",
+                    len(df), df["gw"].nunique())
 
 
 class FetchBetting(FetchData):
@@ -436,30 +570,35 @@ class FetchELO(FetchData):
     def run_tests(self, df: pd.DataFrame) -> None:
         pass
 
+
 class MergeData:
-    def __init__(self, vaastav_df:pd.DataFrame,
-                 betting_df:pd.DataFrame,
-                 elo_df:pd.DataFrame):
+    def __init__(self, vaastav_df: pd.DataFrame,
+                 betting_df: pd.DataFrame,
+                 elo_df: pd.DataFrame):
 
         self.vaastav_df = vaastav_df
         self.betting_df = betting_df
         self.elo_df = elo_df
 
-    def _elo_betting(self)->pd.DataFrame:
+    def _elo_betting(self) -> pd.DataFrame:
         elo_df = self.elo_df
         betting_df = self.betting_df
+
+        if elo_df.empty or betting_df.empty:
+            logger.warning("Brak danych ELO lub bukmacherskich — pomijam łączenie ELO+betting.")
+            return pd.DataFrame()
 
         betting_df = betting_df.sort_values("date")
         elo_df = elo_df.sort_values("from")
 
-        if elo_df.empty or betting_df.empty:
-            return pd.DataFrame()
-        betting_elo_df = pd.merge_asof(betting_df,
-                                       elo_df,
-                                       left_on="date",
-                                       right_on="from",
-                                       by="team",
-                                       direction="backward")
+        betting_elo_df = pd.merge_asof(
+            betting_df,
+            elo_df,
+            left_on="date",
+            right_on="from",
+            by="team",
+            direction="backward"
+        )
 
         if "from" in betting_elo_df.columns:
             betting_elo_df = betting_elo_df.drop(columns=['from'])
@@ -497,12 +636,12 @@ class MergeData:
         df.rename(columns={'was_home_y': 'was_home',
                            'opponent_team_y': 'opponent_team'}, inplace=True)
 
-
         return df
 
     def get_data(self) -> pd.DataFrame:
         df = self._elo_betting_vaastav()
         return df
+
 
 if __name__ == "__main__":
     logger.info("Rozpoczęcie potoku przetwarzania danych FPL.")
@@ -510,19 +649,29 @@ if __name__ == "__main__":
     content_cfg = ContentConfig()
     vaastav_fetcher = FetchVaastav(config_data=content_cfg)
     betting_fetcher = FetchBetting(config_data=content_cfg)
+    fci_fetcher = FetchFCI(config_data=content_cfg)
 
     vaastav_df = vaastav_fetcher.get_data()
+    fci_df = fci_fetcher.get_data()
+
+    if not fci_df.empty:
+        fci_df["kickoff_time"] = pd.to_datetime(
+            pd.to_datetime(fci_df["kickoff_time"], errors="coerce").dt.strftime("%d/%m/%Y"),
+            dayfirst=True
+        )
+        vaastav_df = pd.concat([vaastav_df, fci_df], axis=0, ignore_index=True)
+        vaastav_df["season"] = vaastav_df["season"].apply(
+            lambda x: re.sub(r'^20(\d{2})-(\d{2})$', r'\1\2', str(x))
+        )
+
     betting_df = betting_fetcher.get_data()
-
     elo_fetcher = FetchELO(config_data=content_cfg, betting_df=betting_df)
-
     elo_df = elo_fetcher.get_data()
 
     merger = MergeData(vaastav_df=vaastav_df, betting_df=betting_df, elo_df=elo_df)
     data = merger.get_data()
 
     if not data.empty:
-
         data.to_parquet(config.FPL_VAASTAV_PATH, index=False)
         logger.info("Pomyślnie wyeksportowano zbiór danych do formatu Parquet: %s", config.FPL_VAASTAV_PATH)
     else:
