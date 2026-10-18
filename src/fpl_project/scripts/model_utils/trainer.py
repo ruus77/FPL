@@ -99,7 +99,15 @@ class Trainer:
         mae = self.mae_at.compute()
         r2 = self.r2_metric.compute().item()
 
+        total_n_mse = (self.mse_at.n_b + self.mse_at.n_m + self.mse_at.n_p).clamp(min=1)
+        overall_mse = ((self.mse_at.err_sum_b + self.mse_at.err_sum_m + self.mse_at.err_sum_p) / total_n_mse).item()
+
+        total_n_mae = (self.mae_at.n_b + self.mae_at.n_m + self.mae_at.n_p).clamp(min=1)
+        overall_mae = ((self.mae_at.err_sum_b + self.mae_at.err_sum_m + self.mae_at.err_sum_p) / total_n_mae).item()
+
         return (
+            overall_mse,
+            overall_mae,
             mse["mse@budget"].item(),
             mse["mse@mid"].item(),
             mse["mse@premium"].item(),
@@ -150,6 +158,45 @@ class Trainer:
             torch.cat(preds_all),
         )
 
+    def evaluate_dataloader(self, dataloader, model, loss_fn) -> dict[str, float]:
+        (
+            loss,
+            mse,
+            mae,
+            mse_b,
+            mse_m,
+            mse_p,
+            mae_b,
+            mae_m,
+            mae_p,
+            adj_r2,
+            _,
+        ) = self.test_step(dataloader, model, loss_fn)
+        return {
+            "loss": loss,
+            "mse": mse,
+            "mae": mae,
+            "adj_r2": adj_r2,
+            "mse@budget": mse_b,
+            "mse@mid": mse_m,
+            "mse@premium": mse_p,
+            "mae@budget": mae_b,
+            "mae@mid": mae_m,
+            "mae@premium": mae_p,
+        }
+
+    def predict_dataloader(self, dataloader, model) -> np.ndarray:
+        model.eval()
+        preds_all = []
+        with torch.no_grad():
+            for X, _ in dataloader:
+                X = X.to(self.device)
+                pred = model(X)
+                preds_all.append(pred.cpu())
+        preds_tensor = torch.cat(preds_all)
+        preds_inv = self._inverse(preds_tensor).detach().cpu().numpy().flatten()
+        return np.clip(preds_inv, 0.0, 15.0)
+
     def model_eval(
         self,
         train_dataloader,
@@ -161,10 +208,13 @@ class Trainer:
         num_epochs: int = 100,
         patience: int = 10,
         tolerance: float = 1e-6,
+        monitor: str = "mse",
+        verbose: bool = True,
     ):
 
         best_state = copy.deepcopy(model.state_dict())
-        best_loss = float("inf")
+        mode = "max" if monitor == "adj_r2" else "min"
+        best_metric = -float("inf") if mode == "max" else float("inf")
         counter = 0
         results = defaultdict(list)
 
@@ -172,6 +222,8 @@ class Trainer:
 
             (
                 tr_loss,
+                tr_mse,
+                tr_mae,
                 tr_mse_b,
                 tr_mse_m,
                 tr_mse_p,
@@ -183,6 +235,8 @@ class Trainer:
 
             (
                 ts_loss,
+                ts_mse,
+                ts_mae,
                 ts_mse_b,
                 ts_mse_m,
                 ts_mse_p,
@@ -193,16 +247,30 @@ class Trainer:
                 _,
             ) = self.test_step(test_dataloader, model, loss_fn)
 
+            monitor_map = {
+                "mse": ts_mse,
+                "mae": ts_mae,
+                "adj_r2": ts_adj_r2,
+                "loss": ts_loss,
+            }
+            if monitor not in monitor_map:
+                raise ValueError(f"Nieznana metryka monitorowania: {monitor}")
+            current_metric = monitor_map[monitor]
+
             if scheduler is not None:
                 if isinstance(
                     scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
                 ):
-                    scheduler.step(ts_loss)
+                    scheduler.step(current_metric)
                 else:
                     scheduler.step()
 
             results["train_loss"].append(tr_loss)
             results["test_loss"].append(ts_loss)
+            results["train_mse"].append(tr_mse)
+            results["test_mse"].append(ts_mse)
+            results["train_mae"].append(tr_mae)
+            results["test_mae"].append(ts_mae)
 
             results["train_mse@budget"].append(tr_mse_b)
             results["test_mse@budget"].append(ts_mse_b)
@@ -235,8 +303,13 @@ class Trainer:
                     f"AdjR2={ts_adj_r2:.4f}"
                 )
 
-            if ts_loss < best_loss - tolerance:
-                best_loss = ts_loss
+            improved = (
+                current_metric > best_metric + tolerance
+                if mode == "max"
+                else current_metric < best_metric - tolerance
+            )
+            if improved:
+                best_metric = current_metric
                 counter = 0
                 best_state = copy.deepcopy(model.state_dict())
             else:

@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
-from fpl_project.scripts.data_utils.colors_config import team_colors  # <-- TUTAJ DODANO .scripts
+from fpl_project.scripts.data_utils.colors_config import team_colors
 import plotly.io as pio
 pio.renderers.default = "png"
 import pandas as pd

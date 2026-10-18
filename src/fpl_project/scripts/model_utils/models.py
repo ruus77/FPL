@@ -5,14 +5,17 @@ import torch
 
 class MLP(nn.Module):
     def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int = 1,
-                 dropout_rates: list[float] | None = None):
+                 dropout_rates: list[float] | None = None, dropout: float | None = None):
         super().__init__()
         if dropout_rates is None:
-            dropout_rates = [0.2] + [0.1] * (len(hidden_sizes) - 1)
+            if dropout is not None:
+                dropout_rates = [dropout] * len(hidden_sizes)
+            else:
+                dropout_rates = [0.2] + [0.1] * (len(hidden_sizes) - 1)
 
         layers = []
         in_dim = input_size
-        self.feature_selection = nn.Parameter(torch.ones(input_size) * .01)
+        self.feature_selection = nn.Parameter(torch.zeros(input_size))
 
         for h, dr in zip(hidden_sizes, dropout_rates):
             layers += [nn.Linear(in_dim, h), nn.LayerNorm(h), nn.LeakyReLU(0.01), nn.Dropout(dr)]
@@ -21,7 +24,6 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * torch.sigmoid(self.feature_selection)
         return self.net(x)
 
 
@@ -33,7 +35,7 @@ class Conv1DRegressor(nn.Module):
         if channels is None:
             channels = [64, 128, 64]
             
-        self.feature_selection = nn.Parameter(torch.ones(n_features))
+        self.feature_selection = nn.Parameter(torch.zeros(n_features))
         
         self.input_proj = nn.Conv1d(n_features, channels[0], kernel_size=1)
         
@@ -72,7 +74,6 @@ class Conv1DRegressor(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * self.feature_selection
         x = x.transpose(1, 2)
         
         out = self.input_proj(x)
@@ -91,7 +92,7 @@ class LSTMRegressor(nn.Module):
                  dropout: float = 0.2, bidirectional: bool = False):
         super().__init__()
         
-        self.feature_selection = nn.Parameter(torch.ones(n_features))
+        self.feature_selection = nn.Parameter(torch.zeros(n_features))
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -120,7 +121,6 @@ class LSTMRegressor(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * self.feature_selection
         
         x = self.input_proj(x)
         _, (h_n, _) = self.lstm(x)
@@ -136,7 +136,12 @@ class LSTMRegressor(nn.Module):
 class FPLLoss(nn.Module):
     def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,
                  model_type: str = "mlp",
-                 w_premium: float = 3.0, under_predict_penalty: float = 1.5):
+                 w_mid: float = 1.25,
+                 w_premium: float = 2.0,
+                 under_predict_penalty: float = 1.25,
+                 m_threshold: float = 60.0 / 90.0,
+                 w_minutes: float = 1.5,
+                 sharpness: float = 30.0):
         super().__init__()
         self.p_low = p_low
         self.p_high = p_high
@@ -144,8 +149,13 @@ class FPLLoss(nn.Module):
         self.minutes_idx = minutes_idx
         self.model_type = model_type
 
+        self.m_threshold = m_threshold / 90.0 if m_threshold > 1.0 else m_threshold
+        self.sharpness = sharpness
+
+        self.w_mid = w_mid
         self.w_premium = w_premium
         self.under_predict_penalty = under_predict_penalty
+        self.w_minutes = w_minutes
 
         self.mse = nn.MSELoss(reduction='none')
 
@@ -166,15 +176,26 @@ class FPLLoss(nn.Module):
 
         base_loss = self.mse(y_pred, y_true)
 
-        premium_soft_mask = torch.sigmoid((price - self.p_high) * 20)
-        price_weights = 1.0 + (self.w_premium - 1.0) * premium_soft_mask
+        mid_soft_mask = torch.sigmoid((price - self.p_low) * self.sharpness)
+        premium_soft_mask = torch.sigmoid((price - self.p_high) * self.sharpness)
+        price_weights = (
+            1.0
+            + (self.w_mid - 1.0) * mid_soft_mask
+            + (self.w_premium - self.w_mid) * premium_soft_mask
+        )
 
-        error_diff = y_true - y_pred
-        under_predict_signal = nn.functional.softplus(error_diff, beta=2.0)
-        asymmetry_weight = 1.0 + (self.under_predict_penalty - 1.0) * (
-                    under_predict_signal / (under_predict_signal + 1.0))
-        price_weights = price_weights * asymmetry_weight
+        if self.under_predict_penalty > 1.0:
+            error_diff = y_true - y_pred
+            under_predict_signal = nn.functional.softplus(error_diff, beta=2.0)
+            asymmetry_weight = 1.0 + (self.under_predict_penalty - 1.0) * (
+                under_predict_signal / (under_predict_signal + 1.0)
+            )
+        else:
+            asymmetry_weight = 1.0
 
-        final_loss = base_loss * price_weights * (minutes + 0.1)
+        minutes_soft_mask = torch.sigmoid((minutes - self.m_threshold) * self.sharpness)
+        minutes_weights = 1.0 + (self.w_minutes - 1.0) * minutes_soft_mask
 
-        return final_loss.mean()
+        loss = base_loss * price_weights * asymmetry_weight * minutes_weights
+
+        return loss.mean()

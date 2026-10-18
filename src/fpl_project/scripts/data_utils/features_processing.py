@@ -16,7 +16,7 @@ class FeatureEngineer:
         if self.cols_map is None:
             return pd.DataFrame(), []
 
-        ema_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+        ema_features = self.cols_map.LEAKAGE_COLS
         ema_features = [col for col in ema_features if col in df.columns]
 
         df = sort_data(df)
@@ -34,8 +34,8 @@ class FeatureEngineer:
         df = self.df.copy()
         if self.cols_map is None:
             return pd.DataFrame(), []
-
-        lag_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+        
+        lag_features = self.cols_map.LEAKAGE_COLS
         lag_features = [col for col in lag_features if col in df.columns]
 
         df = sort_data(df)
@@ -55,7 +55,8 @@ class FeatureEngineer:
         if self.cols_map is None:
             return pd.DataFrame(), []
 
-        std_features = self.cols_map.fpl_cols + self.cols_map.perf_cols + self.cols_map.target
+
+        std_features = self.cols_map.LEAKAGE_COLS
 
         std_features = [col for col in std_features if col in df.columns]
 
@@ -118,16 +119,10 @@ class FeatureEngineer:
 
             df_std = pd.concat(std_frames, axis=1)
 
-        # Ensure we have lists
-        pre_game_cols = []
-        if getattr(self.cols_map, 'pre_game_cols', None) is not None:
-            pre_game_cols = list(set(self.cols_map.pre_game_cols))
 
-        target_cols = []
-        if getattr(self.cols_map, 'target', None) is not None:
-            target_cols = list(set(self.cols_map.target))
+        pre_game_cols = self.cols_map.target + self.cols_map.id_cols + self.cols_map.betting_cols + self.cols_map.static_cols
 
-        pre_game_cols = pre_game_cols + target_cols
-        pre_game_cols = [col for col in pre_game_cols if col in df.columns]
-
-        return pd.concat([df[pre_game_cols], df_ema, df_lag, df_std], axis=1).fillna(0)
+        out = pd.concat([df[pre_game_cols], df_ema, df_lag, df_std], axis=1)
+        num_cols = out.select_dtypes(include="number").columns
+        out[num_cols] = out[num_cols].fillna(out[num_cols].median()).fillna(0)
+        return out

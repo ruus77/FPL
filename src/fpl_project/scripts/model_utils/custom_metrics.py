@@ -4,16 +4,6 @@ import torch
 
 class BaseMetric(Metric):
     def __init__(self, p_low: float, p_high: float, value_idx: int, model_type: str = "mlp"):
-        """
-        Parameters
-        ----------
-        p_low:       dolny próg cenowy w [0, 1]
-        p_high:      górny próg cenowy w [0, 1]
-        value_idx:   indeks kolumny 'value' w wymiarze cech
-        model_type:  'mlp'    → X: (B, F)
-                     'lstm'   → X: (B, T, F)
-                     'conv1d' → X: (B, T, F)
-        """
         super().__init__()
         assert model_type in ("mlp", "lstm", "conv1d"), f"Nieznany model_type: {model_type}"
 

@@ -1,0 +1,1023 @@
+ \documentclass[a4paper,twoside,11pt]{mwrep}
+\usepackage[utf8]{inputenc}
+\usepackage{polski}
+\usepackage{graphicx}
+\usepackage{xcolor}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black!30!blue,
+    filecolor=black!30!magenta, 
+    citecolor=black!30!green,      
+    urlcolor=black!30!cyan
+}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% pakiety matematyczne
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{caption}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Ustawienia wymiarów strony
+\usepackage{geometry}
+ \geometry{
+    paper=a4paper,
+    inner=30mm,         % Inner margin
+    outer=20mm,         % Outer margin
+    %bindingoffset=10mm, % Binding offset
+    nohead,
+    top=20mm,           % Top margin
+    bottom=25mm,        % Bottom margin
+    }
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% komenda dodająca pustą stronę
+\newcommand\blankpage{%
+    \null
+    \thispagestyle{empty}%
+    \addtocounter{page}{-1}%
+    \newpage}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+% wprowadzenie środowisk dla twierdzeń, lematów, definicji i wniosków
+\theoremstyle{plain} \newtheorem{thm}{Twierdzenie}
+\theoremstyle{plain} \newtheorem{lem}{Lemat}
+\theoremstyle{definition} \newtheorem{defn}{Definicja}
+\theoremstyle{remark} \newtheorem*{rem}{Wniosek}
+
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible,
+    captionpos=b
+}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Informacje na stronę tytułową
+\newcommand{\autor}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
+Samuel Rus}
+%
+\newcommand{\album}{\fontfamily{qhv}\fontshape{n}\selectfont
+\ldots\ldots}
+%
+\newcommand{\pltitle}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
+
+Wykorzystanie wybranych metod uczenia maszynowego w predykcji efektywności sportowej zawodników Premier League.}
+%
+\newcommand{\engtitle}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
+
+Predicting Premier League Player Performance Using Selected Machine Learning Methods}
+%
+\newcommand{\level}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE
+inżynierska}
+%
+\newcommand{\kierunek}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE
+Matematyka stosowana}
+%
+\newcommand{\promotor}{\fontfamily{qhv}\fontshape{n}\selectfont\large\bfseries
+dr Adam Sebastian Marszałek}
+%
+\newcommand{\spec}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
+ Analiza danych}
+%
+\newcommand{\rok}{\fontfamily{qhv}\fontshape{n}\selectfont
+202\ldots}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+% Strona tytułowa
+ \begin{titlepage}
+ \thispagestyle{empty}
+ \vspace*{3ex}
+\fontfamily{qhv}\fontshape{n}\selectfont
+\hspace{-1.3em}\parbox{0.15\textwidth}{\includegraphics[height=0.15\textwidth]{logoPK.png}}
+\parbox[c]{0.7\textwidth}
+{\centering
+\LARGE
+{\bfseries Politechnika Krakowska}\\
+{\bfseries im. Tadeusza Kościuszki}\\
+
+\smallskip
+
+\LARGE Wydział Informatyki i Matematyki}\hspace{0.3em}
+ \parbox{0.2\textwidth}{\includegraphics[width=0.15\textwidth]{logoIT.png}}%\hspace{0.12em}
+\parbox[c]{0.15\textwidth}
+
+\vspace{2ex}
+
+ \vspace{0.13\textheight}
+
+ \center{\autor}
+ \smallskip
+ \center{\large numer albumu: 151814 }
+
+\vspace*{3ex}
+
+ \center{\pltitle}
+ 
+ \smallskip
+
+ \center{\engtitle}
+
+ \bigskip
+
+ \center{\LARGE\bfseries praca \level \\[1ex]
+\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries na kierunku
+ \kierunek\\[1ex]
+ specjalność \spec} 
+
+\vspace{0.18\textheight}
+
+
+\hspace{0.4\textwidth} \parbox{0.5\textwidth}{Praca przygotowana pod
+kierunkiem:
+\\
+%
+\bfseries \promotor}
+
+
+\vfill
+
+ \center{Kraków, 2026/27}
+ \end{titlepage}
+\newpage
+\blankpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Streszczenie / Abstract (styl arXiv)
+\pagenumbering{roman}
+
+\thispagestyle{empty}
+\chapter*{Streszczenie}
+\addcontentsline{toc}{chapter}{Streszczenie}
+\noindent
+Praca dotyczy predykcji punktacji zawodników w grze Fantasy Premier League przy użyciu metod uczenia maszynowego. Zaproponowany pełny proces
+przetwarzania danych, łączący dane historyczne kolejka po kolejce oraz kursy bukmacherskie przeliczone na prawdopodobieństwa. Po eksploracyjnej analizie
+danych oraz inżynierii cech
+respektującej rygor braku wycieku informacji z przyszłości,
+porównano trzy rodziny modeli regresyjnych: uogólnione modele liniowe, modele zespołowe oparte na drzewach decyzyjnych oraz sieci neuronowe. Zaprojektowano autorską funkcję straty oraz
+metryki ewaluacyjne segmentowane względem ceny rynkowej zawodnika, odzwierciedlające asymetryczną
+użyteczność decyzyjną błędu predykcji z perspektywy użytkownika gry.
+Rozważono również rozszerzenie architektury o dodatkową warstwę (dalej nazywaną meta modelem), łączącą predykcje modeli bazowych z poszanowaniem chronologicznego podziału danych, wraz z oceną wpływu takiego podejścia na jakość i wiarygodność predykcji.
+
+\clearpage
+\thispagestyle{empty}
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\noindent
+This thesis addresses the prediction of Fantasy Premier League (FPL)
+player point scores using machine learning methods. A complete data
+pipeline is proposed, combining historical gameweek-level data (the
+\emph{vaastav/Fantasy-Premier-League} repository) and bookmaker odds
+(\emph{football-data.co.uk}) converted into probabilities. Following exploratory data
+analysis (target distribution analysis, Spearman rank correlations,
+PCA, k-means clustering with Kruskal--Wallis testing) and feature
+engineering designed to strictly avoid data leakage (pre-game features,
+exponential moving averages, lagged features, rolling standard
+deviations), three families of regression models are compared:
+generalized linear models (GLM), tree-based ensemble models (Random
+Forest, XGBoost, CatBoost), and neural networks (MLP, a 1D convolutional
+network, and an LSTM network). A custom loss function (\texttt{FPLLoss})
+and price-segmented evaluation metrics (budget / mid / premium players)
+are proposed, reflecting the asymmetric decision-relevant cost of
+prediction errors from the perspective of an FPL player. An extension of
+the architecture with an additional stacking layer (a meta-model
+combining base-model predictions under a strict chronological data
+split) is also considered, together with an assessment of its impact on
+predictive quality and reliability.
+
+\medskip
+\noindent\textbf{Keywords:} Fantasy Premier League, machine learning,
+regression, generalized linear models, XGBoost, CatBoost, neural
+networks, LSTM, loss function, stacking, sports analytics.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Spis treści
+\tableofcontents
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+%======================================================================
+\chapter*{Wstęp}
+\addcontentsline{toc}{chapter}{Wstęp}
+
+Fantasy Premier League jest jedną z najpopularniejszych gier sportowych na świecie, w której uczestnicy zarządzają wirtualną
+drużyną piłkarzy angielskiej Premier League, otrzymując punkty na podstawie
+rzeczywistych występów zawodników w danej kolejce ligowej. Gra angażuje kilkanaście milionów użytkowników w każdym sezonie, co sprawia że problem predykcji liczby punktów zdobywanych przez zawodnika w kolejnej
+kolejce stał się interesującym zagadnieniem badawczym,
+łączącym elementy analizy szeregów czasowych, regresji oraz uczenia maszynowego
+stosowanego do danych sportowych.
+
+Predykcja punktacji FPL charakteryzuje się kilkoma cechami utrudniającymi
+zastosowanie standardowych metod regresji:
+\begin{itemize}
+    \item Rozkład zmiennej celu jest silnie asymetryczny i skoncentrowany
+    wokół zera. Znaczna część zawodników w danej kolejce nie wychodzi na
+    boisko lub gra niewielką liczbę minut.
+    \item Wariancja punktacji jest silnie zróżnicowana w zależności od
+    pozycji oraz wartości rynkowej zawodnika: gracze o wysokiej cenie mają
+    zarówno wyższą oczekiwaną liczbę punktów, jak i większą wariancję
+    wyników, co czyni błąd predykcji dla tej grupy szczególnie kosztownym
+    z perspektywy użytkownika podejmującego decyzje transferowe.
+    \item Dane mają naturalną strukturę czasową, co wymusza odpowiednie
+    podejście do konstrukcji cech opóźnionych oraz podziału zbioru na
+    część treningową, walidacyjną i testową w sposób chronologiczny,
+    zapobiegający wyciekowi danych z przyszłości.
+\end{itemize}
+
+
+Celem pracy jest zaprojektowanie, implementacja oraz porównanie kilku
+rodzin metod uczenia maszynowego: od uogólnionych modeli liniowych, przez modele oparte na drzewach decyzyjnych, po sieci neuronowe w zadaniu predykcji liczby punktów FPL
+zdobywanych przez zawodnika w pojedynczej kolejce ligowej, na podstawie
+danych historycznych, statystyk oczekiwanych, kursów
+bukmacherskich przeliczonych na prawdopodobieństwa. Wszystkie dane pochodzą z otwartych źródeł i są ujednolicane do spójnego formatu w procesie integracji. Istotnym elementem pracy jest zaprojektowanie funkcji straty
+oraz metryk ewaluacyjnych uwzględniających segmentację zawodników według
+ceny rynkowej, tak aby jakość predykcji była oceniana w sposób zbliżony do
+rzeczywistej użyteczności decyzyjnej dla gracza FPL.
+
+Praca obejmuje pełny proces przetwarzania danych: od automatycznego
+pozyskania danych historycznych z publicznych repozytoriów i serwisów, kursy bukmacherskie, przez eksploracyjną
+analizę danych i inżynierię cech, po budowę, trenowanie i ewaluację modeli
+predykcyjnych wraz ze śledzeniem eksperymentów. Dodatkową częscią pracy, będzie wybór składu na daną kolejke Premier League.
+
+
+%======================================================================
+\chapter{Charakterystyka problemu}\label{ch:problem}
+\section{Zasady gry Fantasy Premier League}
+
+W grze FPL uczestnik tworzy drużynę piłkarzy Premier League, mając do dyspozycji 100 milionów funtów wirtualnego budżetu na początku sezonu. Wybór obejmuje bramkarzy, obrońców, pomocników oraz napastników. W każdej kolejce ligowej zawodnicy otrzymują punkty na podstawie zdarzeń meczowych: goli, asyst, czystych kont, kartek, interwencji bramkarskich czy statystyk wpływających na system bonusowy. Kluczową cechą systemu punktowego jest jego zależność od nominalnej pozycji zawodnika - bramkarze i obrońcy są znacznie wyżej nagradzani za czyste konto lub strzelonego gola niż gracze formacji ofensywnych, co uzasadnia podział analizy według pozycji, stosowaną w dalszych rozdziałach pracy.
+
+Szczegółowe zestawienie zasad punktacji z uwzględnieniem podziału na pozycje boiskowe przedstawiono w Tabeli~\ref{tab:fpl_punktacja}.
+
+\begin{table}[!htbp]
+
+\renewcommand{\arraystretch}{0.92} 
+\resizebox{\linewidth}{!}{% zabezpiecza przed wyjściem tabeli poza marginesy
+\begin{tabular}{lcccc}
+\hline
+\textbf{Zdarzenie meczowe} & \textbf{Bramkarz} & \textbf{Obrońca} & \textbf{Pomocnik} & \textbf{Napastnik   } \\
+\hline
+Gra do 60 minut & 1 & 1 & 1 & 1 \\
+Gra co najmniej 60 minut & 2 & 2 & 2 & 2 \\
+Gol & 6 & 6 & 5 & 4 \\
+Asysta & 3 & 3 & 3 & 3 \\
+Czyste konto (min. 60 min gry) & 4 & 4 & 1 & 0 \\
+Każde 3 obronione strzały & 1 & -- & -- & -- \\
+Obrona rzutu karnego & 5 & -- & -- & -- \\
+Niewykorzystany rzut karny & -2 & -2 & -2 & -2 \\
+Każde 2 stracone bramki & -1 & -1 & 0 & 0 \\
+Żółta kartka & -1 & -1 & -1 & -1 \\
+Czerwona kartka & -3 & -3 & -3 & -3 \\
+Gol samobójczy & -2 & -2 & -2 & -2 \\
+Punkty bonusowe (BPS)* & 1--3 & 1--3 & 1--3 & 1--3 \\
+\hline
+\multicolumn{5}{l}{\footnotesize{* Punkty bonusowe przyznawane 3 najlepszym graczom wg wskaźnika BPS.}} \\
+
+\end{tabular}%
+}
+\end{table}
+\section{Sformułowanie zadania predykcyjnego}
+
+Zadanie zdefiniowano jako regresję jednowymiarową: dla zawodnika $i$ w
+kolejce $t$ sezonu $s$ celem jest predykcja wartości
+$y_{i,t,s} = \texttt{total\_points}_{i,t,s} \in \mathbb{Z}_{\geq 0}$
+na podstawie wektora cech $\mathbf{x}_{i,t,s}$ zbudowanego wyłącznie z
+informacji dostępnych \emph{przed} rozpoczęciem kolejki $t$ (tzw. cechy
+\emph{pre-game}), tj. bez wykorzystania statystyk z samego meczu, którego
+wynik jest przedmiotem predykcji. Ograniczenie to (opisane szczegółowo w
+rozdziale~\ref{ch:features}) jest krytyczne dla poprawności metodologicznej
+-- jego naruszenie prowadziłoby do wycieku danych i sztucznie zawyżonej
+jakości modelu w warunkach walidacji, niemożliwej do odtworzenia w
+rzeczywistym użyciu prognozy przed kolejką.
+
+Dodatkowym utrudnieniem jest silna heterogeniczność zadania względem ceny
+rynkowej zawodnika (\texttt{value}), będącej w przybliżeniu \emph{proxy} dla
+jego jakości i regularności gry. W pracy przyjęto podział zawodników na
+trzy segmenty cenowe -- budżetowy, średni i premium -- na podstawie
+kwantyli rozkładu ceny (odpowiednio 50. i 95,5. percentyl), co pozwala
+raportować jakość predykcji oddzielnie dla każdej grupy (rozdział
+\ref{ch:loss}).
+
+%======================================================================
+\chapter{Źródła i pozyskiwanie danych}\label{ch:dane}
+
+\section{Przegląd źródeł danych}
+
+Dane wykorzystane w pracy pochodzą z trzech niezależnych źródeł, łączonych
+następnie w jeden spójny zbiór przy użyciu procedur ujednolicania formatów:
+
+\begin{itemize}
+    \item \textbf{vaastav/Fantasy-Premier-League} -- publiczne
+    repozytorium GitHub agregujące historyczne dane kolejka po kolejce oraz metadane zawodników (\texttt{players\_raw.csv})
+    dla sezonów Premier League od 2022/23 do bieżącego sezonu 2025/26;
+    \item \textbf{football-data.co.uk} -- serwis udostępniający historyczne
+    kursy bukmacherskie (rynek 1X2 oraz powyżej/poniżej 2,5 gola) dla
+    poszczególnych spotkań ligowych;
+\end{itemize}
+
+\section{Pozyskiwanie danych kolejka-po-kolejce (\texttt{FetchVaastav})}
+
+Klasa \texttt{FetchVaastav} pobiera dane dla każdego sezonu i każdej z 38
+kolejek osobno, łącząc je następnie z metadanymi tożsamości zawodników
+(\texttt{id}, imię i nazwisko, \texttt{code}) po kluczu
+\texttt{(element, season)}. W procesie czyszczenia danych
+(\texttt{\_merge\_and\_clean}) wykonywane są następujące operacje:
+\begin{itemize}
+    \item normalizacja ceny zawodnika (\texttt{value}) do jednostek
+    właściwych grze (dzielenie przez 10);
+    \item normalizacja popularności wyboru (\texttt{selected}) do rozkładu
+    prawdopodobieństwa w obrębie każdej pary (sezon, kolejka), poprzez
+    podział przez sumę w grupie;
+    \item parsowanie i ujednolicenie znacznika czasu meczu
+    (\texttt{kickoff\_time});
+    \item ujednolicenie etykiety sezonu do formatu czterocyfrowego (np.
+    \texttt{"2022-23"} $\rightarrow$ \texttt{2223});
+    \item usunięcie kolumn nieistotnych merytorycznie lub wprowadzonych
+    zmianami w strukturze danych źródłowych między sezonami (m.in. cechy
+    związane z rolą menedżera drużyny, \texttt{mng\_*});
+    \item odrzucenie rekordów z brakami w kluczowych kolumnach
+    identyfikacyjnych (\texttt{team}, \texttt{season}, \texttt{was\_home},
+    \texttt{kickoff\_time}).
+\end{itemize}
+
+Dodatkowo zaimplementowano metodę walidacyjną \texttt{run\_tests},
+realizującą automatyczny raport jakości danych (\emph{data quality report}):
+kompletność liczby kolejek w sezonie (oczekiwane 38), odsetek braków
+danych w poszczególnych kolumnach, spójność schematu kolumn między
+sezonami, zakres wartości ceny zawodnika oraz wykrywanie duplikatów po
+kluczu głównym \texttt{(code, season, gw)}.
+
+\section{Pozyskiwanie kursów bukmacherskich (\texttt{FetchBetting})}
+
+Klasa \texttt{FetchBetting} pobiera dane kursów bukmacherskich (rynek
+zwycięstwo gospodarzy / remis / zwycięstwo gości oraz liczba goli
+powyżej/poniżej 2,5) i przekształca je w dwóch krokach:
+
+\begin{enumerate}
+    \item \textbf{Konwersja kursów na prawdopodobieństwa} -- surowe
+    prawdopodobieństwo implikowane obliczane jest jako odwrotność kursu
+    ($\hat{p}_k = 1/\text{kurs}_k$), a następnie normalizowane w celu
+    usunięcia marży bukmacherskiej (\emph{overround}):
+    \begin{equation}
+        p_k = \frac{\hat{p}_k}{\sum_{j} \hat{p}_j}, \qquad \sum_k p_k = 1.
+    \end{equation}
+    \item \textbf{Transformacja z formatu szerokiego do długiego} -- każdy
+    mecz (gospodarz--gość) jest rozbijany na dwa rekordy, jeden z
+    perspektywy drużyny gospodarzy, drugi z perspektywy drużyny gości, z
+    odpowiednio dobranymi prawdopodobieństwami zwycięstwa/remisu/porażki
+    oraz opcjonalnym handicapem azjatyckim (\texttt{ahh}), którego znak jest
+    odwracany dla drużynygości.
+\end{enumerate}
+
+% Sekcja Pozyskiwanie ratingów Elo została usunięta
+
+\section{Łączenie źródeł (\texttt{MergeData})}
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        font=\sffamily\small,
+        source/.style={
+            draw=blue!40!black, fill=blue!4, thick, rounded corners=8pt,
+            align=left, text width=5.8cm, minimum height=5.8cm,
+            inner sep=10pt, text=black!90
+        },
+        merge/.style={
+            draw=green!45!black, fill=green!6, thick, rounded corners=8pt,
+            align=center, text width=8cm, minimum height=2cm,
+            inner sep=12pt, text=black!90
+        },
+        arrow/.style={
+            ->, thick, >=stealth, draw=gray!80!black, rounded corners=8pt
+        }
+    ]
+
+    % --- Górny rząd ---
+    \node[source] (vaastav) {
+        \textbf{\large Vaastav (repozytorium GitHub)} \\[0.2cm]
+        \textbf{Opis:} Publiczne repozytorium agregujące oficjalne statystyki z gry FPL. \\[0.1cm]
+        \textbf{Sezony:} 2022/23 -- 2025/26 \\[0.1cm]
+        \textbf{Kluczowe cechy:}
+        \begin{itemize}
+            \setlength\itemsep{0em}
+            \item \texttt{id, name, team, code}
+            \item \texttt{gw, kickoff\_time, was\_home}
+            \item \texttt{value, selected}
+        \end{itemize}
+    };
+
+    \node[source, right=1cm of vaastav] (fci) {
+        \textbf{\large FPL-Core-Insights (FCI)} \\[0.2cm]
+        \textbf{Opis:} Zewnętrzna baza dostarczająca metryki analityczne (xG, xA) i statystyki transferowe. \\[0.1cm]
+        \textbf{Sezony:} 2025/26 (bieżący) \\[0.1cm]
+        \textbf{Kluczowe cechy:}
+        \begin{itemize}
+            \setlength\itemsep{0em}
+            \item \texttt{xP} (oczekiwane punkty)
+            \item \texttt{expected\_goals, expected\_assists}
+            \item \texttt{transfers\_in, transfers\_out}
+        \end{itemize}
+    };
+
+    % Punkt w połowie odstępu między blokami górnego rzędu (bez biblioteki calc)
+    \path (vaastav.south east) -- (fci.south west) coordinate[midway] (mid);
+
+    % --- Środkowy rząd (wycentrowany) ---
+    \node[source, below=1.5cm of mid] (betting) {
+        \textbf{\large football-data.co.uk} \\[0.2cm]
+        \textbf{Opis:} Serwis gromadzący kursy bukmacherskie z rynków 1X2 oraz linii bramkowych. \\[0.1cm]
+        \textbf{Sezony:} 2022/23 -- 2025/26 \\[0.1cm]
+        \textbf{Kluczowe cechy:}
+        \begin{itemize}
+            \setlength\itemsep{0em}
+            \item \texttt{prob\_win, prob\_draw, prob\_lose}
+            \item \texttt{prob\_over\_2.5, prob\_under\_2.5}
+            \item \texttt{ahh} (handicap azjatycki)
+        \end{itemize}
+    };
+
+    % --- Zbiór docelowy ---
+    \node[merge, below=1.7cm of betting] (dataset) {
+        \textbf{\Large Zintegrowany zbiór danych} \\[0.2cm]
+        \normalsize Zapis do formatu Parquet po asynchronicznym \\
+        łączeniu (\texttt{merge\_asof}) i złączeniach wewnętrznych
+    };
+
+    % --- Strzałki: górne bloki omijają środkowy bokiem ---
+    \draw[arrow] (vaastav.west) -- ++(-0.5cm,0) |- (dataset.west);
+    \draw[arrow] (fci.east)     -- ++(0.5cm,0)  |- (dataset.east);
+    \draw[arrow] (betting.south) -- (dataset.north);
+
+    \end{tikzpicture}
+    \caption{Architektura zasilania modelu FPL. Wszystkie źródła przedstawiono jednolitym formatem.}
+    \label{fig:data_sources_clean}
+\end{figure}
+
+Finalne połączenie dwóch źródeł danych odbywa się w jednym kroku:
+\section{Wstępne przekształcenia}
+
+Przed właściwą analizą wykonano ujednolicenie typów danych (rzutowanie
+kolumn liczbowych do \texttt{float32}), zmianę nazw wybranych kolumn
+statystyk oczekiwanych na czytelniejsze odpowiedniki (np.
+\texttt{expected\_goals} $\rightarrow$ \texttt{xg}) oraz normalizację
+statystyk ofensywnych do wartości \emph{na 90 minut} gry
+($x_{\text{per90}} = x \cdot 90 / \text{minuty}$), co umożliwia
+porównywanie zawodników o różnym czasie gry. Z analizy wykluczono pozycję
+\texttt{AM} (napastnik pomocniczy) jako niereprezentowaną w bieżącym
+schemacie pozycji gry.
+
+\section{Analiza rozkładu zmiennej celu}
+
+Rozkład zmiennej \texttt{total\_points} scharakteryzowano za pomocą
+histogramu, wykresu kwantyl-kwantyl (QQ-plot) względem rozkładu
+normalnego oraz miar skośności i kurtozy. Analiza potwierdziła silną
+prawostronną skośność rozkładu oraz istotny udział wartości zerowych,
+wynikający z zawodników niewystępujących w danej kolejce -- obserwacja ta
+uzasadnia wykorzystanie w dalszej części pracy rozkładów właściwych dla
+danych zliczeniowych (Poissona, ujemnego dwumianowego, Tweediego) w
+modelach GLM (rozdział~\ref{ch:models}) oraz odpowiednio zaprojektowanej
+funkcji straty w modelach sieci neuronowych (rozdział~\ref{ch:loss}).
+
+\section{Analiza korelacji}
+
+Ze względu na nieliniowość i obecność wartości odstających zastosowano
+współczynnik korelacji rang Spearmana (nie Pearsona), obliczony osobno dla
+całego zbioru oraz osobno w podziale na pozycję zawodnika. Dla każdej
+pozycji wyznaczono ranking piętnastu (odpowiednio: jedenastu) cech
+najsilniej skorelowanych z \texttt{total\_points}, co pozwoliło
+zidentyfikować różnice w istotności predyktorów między pozycjami (np.
+większe znaczenie cech ofensywnych xG/xA dla pomocników i napastników,
+a defensywnych -- dla obrońców i bramkarzy).
+
+\section{Efekt gry u siebie}
+
+Zweryfikowano hipotezę o wpływie czynnika gry u siebie (\texttt{was\_home})
+na średnią liczbę punktów, poprzez porównanie średnich wartości
+\texttt{total\_points} w obu grupach.
+
+\section{Redukcja wymiarowości i analiza głównych składowych (PCA)}
+
+Do standaryzowanych cech numerycznych zastosowano potok
+\texttt{RobustScaler} $\rightarrow$ \texttt{PCA} (skalowanie odporne na
+wartości odstające, istotne przy silnie skośnym rozkładzie wielu cech
+wydajnościowych). Przeanalizowano wariancję wyjaśnianą przez kolejne
+składowe (wykres \emph{scree plot} wraz z wariancją skumulowaną) oraz
+wykres ładunków (\emph{loading plot}) dwóch pierwszych składowych głównych,
+identyfikujący cechy o największym wkładzie w kierunki głównej zmienności
+danych.
+
+\section{Analiza skupień}
+
+Dla każdej pozycji osobno wykonano standaryzację cech (\texttt{RobustScaler})
+i grupowanie metodą \emph{k-średnich} (\texttt{KMeans}), z liczbą skupień
+$k=3$ (interpretowaną orientacyjnie jako archetypy: gracze defensywni,
+uniwersalni, ofensywni w obrębie danej pozycji), a wyniki zwizualizowano w
+przestrzeni dwóch pierwszych składowych PCA. Istotność statystyczną różnic
+między skupieniami dla wybranych cech (\texttt{total\_points},
+\texttt{minutes}, \texttt{xg\_per\_90}, \texttt{xa\_per\_90},
+\texttt{xg\_conceded\_per\_90}, \texttt{team\_xp}, \texttt{opp\_xp}) oceniono
+testem Kruskala–Wallisa (nieparametrycznym odpowiednikiem jednoczynnikowej
+ANOVA, właściwym dla nienormalnych rozkładów cech), z korekcją na
+wielokrotne testowanie metodą Bonferroniego. Siłę efektu wyrażono
+współczynnikiem $\eta^2$:
+\begin{equation}
+    \eta^2 = \frac{H - k + 1}{n - k},
+\end{equation}
+gdzie $H$ jest statystyką testu Kruskala–Wallisa, $k$ liczbą skupień, a $n$
+liczbą obserwacji, przy umownej interpretacji wielkości efektu:
+$\eta^2 \approx 0{,}01$ -- mały, $0{,}06$ -- średni, $\geq 0{,}14$ -- duży.
+
+%======================================================================
+\chapter{Inżynieria cech}\label{ch:features}
+
+\section{Zasada braku wycieku danych}
+
+Kluczowym założeniem projektowym potoku inżynierii cech jest wykorzystanie
+w zbiorze treningowym wyłącznie informacji dostępnych przed rozpoczęciem
+kolejki, której punktacja jest przedmiotem predykcji. W praktyce oznacza
+to, że wszystkie cechy zbudowane na podstawie statystyk meczowych
+(\texttt{fpl\_cols}, \texttt{perf\_cols}) są przesuwane w czasie
+(\texttt{shift}) o co najmniej jedną kolejkę, natomiast cechy dostępne
+\emph{ex ante} (cena, prawdopodobieństwa bukmacherskie, rating Elo,
+pozycja, informacja o grze u siebie) mogą być wykorzystywane bez
+przesunięcia -- stanowią one zbiór \texttt{pre\_game\_cols}.
+
+\section{Cechy oparte na historii występów zawodnika}
+
+Klasa \texttt{FeatureEngineer} generuje trzy rodziny cech historycznych, w
+każdym przypadku grupując dane po kluczu \texttt{(code, season)} i
+sortując chronologicznie po \texttt{kickoff\_time}:
+
+\begin{itemize}
+    \item \textbf{Wykładnicza średnia ruchoma (EMA)} o rozpiętości $w$:
+    \begin{equation}
+        \text{EMA}_t(w) = \left(1-\alpha\right)\cdot \text{EMA}_{t-1}(w) + \alpha \cdot x_{t-1}, \quad \alpha = \frac{2}{w+1},
+    \end{equation}
+    obliczana z przesunięciem \texttt{shift(1)}, tak aby wartość dla
+    kolejki $t$ nie wykorzystywała statystyk z kolejki $t$;
+    \item \textbf{Cechy opóźnione (lag)} rzędu $l$: $x_{t-l}$, dla
+    $l \in \{1,2,3,5\}$;
+    \item \textbf{Odchylenie standardowe kroczące} w oknie $w$, również z
+    przesunięciem o jedną kolejkę, dla $w \in \{3,5,8\}$, mierzące
+    zmienność (konsystencję) formy zawodnika.
+\end{itemize}
+
+Metoda \texttt{features\_integration} łączy wszystkie trzy rodziny cech
+(dla zadanych list rozmiarów okien) z podzbiorem cech \emph{pre-game} oraz
+zmienną celu, uzupełniając ewentualne braki wynikające z niepełnej historii
+(początek kariery zawodnika lub sezonu) wartością zero.
+
+\section{Cechy pochodne (\emph{feature crosses})}
+
+Na bazie połączonych źródeł danych zbudowano dodatkowe cechy pochodne,
+łączące informację o formie zawodnika z kontekstem meczowym:
+
+\begin{align}
+    \text{transfers\_trend} &= \frac{\text{transfers\_balance}}{\text{selected}}, \\[4pt]
+    \text{prob\_win\_context} &= \text{prob\_win}, \\[4pt]
+    \text{player\_match\_xg\_expected} &= \text{xg\_per\_90} \cdot \text{prob\_win} \cdot \text{prob\_over\_2.5}, \\[4pt]
+    \text{player\_match\_xa\_expected} &= \text{xa\_per\_90} \cdot \text{prob\_win} \cdot \text{prob\_over\_2.5}, \\[4pt]
+    \text{match\_value\_efficiency} &= \frac{\text{prob\_win} + 0{,}5 \cdot \text{prob\_draw}}{\text{value}}, \\[4pt]
+    \text{hype\_vs\_odds\_ratio} &= \frac{\text{transfers\_trend}}{\text{prob\_win} + 0{,}01}.
+\end{align}
+
+Wzór~\eqref{eq:elo} został usunięty wraz z rezygnacją z ratingów Elo. Cechy
+\texttt{player\_match\_xg/xa\_expected} łączą jakość ofensywną zawodnika z
+kontekstem trudności i charakteru meczu (prawdopodobieństwo wygranej i
+liczby goli), natomiast \texttt{hype\_vs\_odds\_ratio} zestawia
+popularność transferową zawodnika (\emph{sentyment} społeczności FPL) z
+obiektywnym prawdopodobieństwem rynkowym, umożliwiając modelowi wychwycenie
+rozbieżności między percepcją a oczekiwaną wydajnością.
+
+\section{Redukcja współliniowości}
+
+Po wygenerowaniu pełnego zestawu cech historycznych wykryto i usunięto
+cechy silnie ze sobą skorelowane (próg $|\rho| > 0{,}9$ w macierzy korelacji
+Pearsona, z pominięciem zmiennej celu), co ogranicza redundancję informacji
+i poprawia stabilność estymacji w modelach liniowych oraz interpretowalność
+istotności cech w modelach drzewiastych.
+
+%======================================================================
+\chapter{Modele uczenia maszynowego}\label{ch:models}
+
+W pracy porównano trzy rodziny modeli o rosnącej złożoności: uogólnione
+modele liniowe, modele zespołowe oparte na drzewach decyzyjnych oraz sieci
+neuronowe głębokie, w tym architektury dedykowane danym sekwencyjnym.
+
+\section{Uogólnione modele liniowe (GLM)}
+
+Jako model bazowy (\emph{baseline}) zastosowano uogólniony model liniowy
+(bibliotekę \texttt{glum}), z regularyzacją typu \emph{elastic net}:
+\begin{equation}
+    \hat{\beta} = \arg\min_{\beta} \; -\ell(\beta; \mathbf{y}, \mathbf{X}) + \alpha \left[ \rho \|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2 \right],
+\end{equation}
+gdzie $\ell$ jest logarytmem wiarygodności rozkładu z rodziny
+wykładniczej. Ze względu na charakter zmiennej celu (nieujemna, silnie
+skośna, z nadmiarem zer) rozważono trzy rodziny rozkładów: Poissona,
+ujemny dwumianowy (\texttt{negative.binomial}) oraz Tweediego, z funkcją
+łącząca dobieraną automatycznie (\texttt{link="auto"}). Model GLM pełni w
+pracy rolę punktu odniesienia interpretowalnego -- współczynniki $\beta$
+pozwalają ocenić kierunek i siłę wpływu poszczególnych cech.
+
+\section{Modele zespołowe oparte na drzewach}
+
+Do rodziny modeli zespołowych włączono:
+\begin{itemize}
+    \item \textbf{Random Forest} (\texttt{RandomForestRegressor}) jako
+    model referencyjny o niskiej wariancji dzięki agregacji \emph{bagging};
+    \item \textbf{XGBoost} (\texttt{XGBRegressor}), z funkcją celu
+    \texttt{reg:squarederror} i metryką \texttt{rmse}, obsługą kategorii
+    poprzez kodowanie \emph{one-hot} realizowane w potoku
+    \texttt{FPLDataPipe};
+    \item \textbf{CatBoost} (\texttt{CatBoostRegressor}), z funkcją straty
+    \texttt{RMSE} oraz natywną obsługą cech kategorycznych
+    (\texttt{cat\_features}) bez konieczności kodowania \emph{one-hot} --
+    z tego względu zaimplementowano osobną wersję potoku danych
+    (\texttt{FPLDataPipe(catboost\_flag=True)}), przekazującą cechy
+    kategoryczne jako łańcuchy znaków (\texttt{passthrough}).
+\end{itemize}
+
+Strojenie hiperparametrów obu modeli gradient boostingu realizowane jest
+metodą przeszukiwania losowego (\texttt{RandomizedSearchCV}) z
+walidacją krzyżową typu \texttt{TimeSeriesSplit} (rozdział
+\ref{ch:training}), z rozkładami hiperparametrów przedstawionymi w
+tabeli~\ref{tab:hparams}.
+
+\begin{table}[h]
+\centering
+\caption{Przestrzenie przeszukiwania hiperparametrów modeli zespołowych.}
+\label{tab:hparams}
+\begin{tabular}{lll}
+\toprule
+Model & Hiperparametr & Rozkład / zakres \\
+\midrule
+CatBoost & \texttt{iterations} & $\mathcal{U}\{150,\dots,500\}$ \\
+         & \texttt{depth} & $\mathcal{U}\{4,\dots,7\}$ \\
+         & \texttt{learning\_rate} & $\mathcal{U}(0{,}01;\,0{,}06)$ \\
+         & \texttt{l2\_leaf\_reg} & $\mathcal{U}(1{,}0;\,9{,}0)$ \\
+         & \texttt{bagging\_temperature} & $\mathcal{U}(0;\,5)$ \\
+         & \texttt{random\_strength} & $\mathcal{U}(0{,}5;\,5{,}5)$ \\
+\midrule
+XGBoost  & \texttt{n\_estimators} & $\mathcal{U}\{150,\dots,500\}$ \\
+         & \texttt{max\_depth} & $\mathcal{U}\{3,\dots,7\}$ \\
+         & \texttt{subsample} & $\mathcal{U}(0{,}7;\,1{,}0)$ \\
+         & \texttt{colsample\_bytree} & $\mathcal{U}(0{,}6;\,0{,}9)$ \\
+         & \texttt{reg\_alpha} / \texttt{reg\_lambda} & $\mathcal{U}(0;\,2)$ / $\mathcal{U}(0{,}5;\,3{,}5)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Wielowarstwowy perceptron (MLP)}
+
+Sieć \texttt{MLP} operuje na cechach tabularycznych (zagregowanych,
+niesekwencyjnych) i zawiera dodatkowy, uczony mechanizm \emph{bramkujący}
+selekcję cech: wektor parametrów $\mathbf{g}$ jest przepuszczany przez
+funkcję sigmoidalną i mnożony element-po-elemencie przez wejście,
+\begin{equation}
+    \tilde{\mathbf{x}} = \mathbf{x} \odot \sigma(\mathbf{g}),
+\end{equation}
+co pozwala sieci w trakcie treningu tłumić cechy mało informatywne. Dalsze
+warstwy ukryte mają strukturę
+\texttt{Linear} $\rightarrow$ \texttt{LayerNorm} $\rightarrow$
+\texttt{LeakyReLU} $\rightarrow$ \texttt{Dropout}, z malejącym
+prawdopodobieństwem odrzucenia w kolejnych warstwach.
+
+\section{Sieć konwolucyjna 1D (Conv1D)}
+
+Model \texttt{Conv1DRegressor} operuje na sekwencjach $T$ ostatnich
+kolejek zawodnika (oknie przesuwnym, opisanym w sekcji
+\ref{sec:seqpipe}), traktując wymiar czasu jako wymiar przestrzenny
+konwolucji jednowymiarowej. Architektura opiera się na blokach
+resztkowych (\emph{residual}):
+\begin{equation}
+    \mathbf{h}^{(l+1)} = \text{ReLU}\big(\,\text{Block}(\mathbf{h}^{(l)}) + \text{Skip}(\mathbf{h}^{(l)})\,\big),
+\end{equation}
+gdzie każdy blok składa się z dwóch warstw \texttt{Conv1d} z
+normalizacją wsadową (\texttt{BatchNorm1d}) i aktywacją \texttt{GELU}, a
+połączenie skrótowe (\texttt{Skip}) jest projekcją $1\times1$, gdy liczba
+kanałów wejściowych i wyjściowych bloku różni się. Po ostatnim bloku
+zastosowano globalne uśrednianie (\texttt{AdaptiveAvgPool1d}) wzdłuż
+wymiaru czasu, a wynik przekazywany jest do głowicy regresyjnej
+(\texttt{Linear} $\rightarrow$ \texttt{LayerNorm} $\rightarrow$
+\texttt{LeakyReLU} $\rightarrow$ \texttt{Dropout} $\rightarrow$
+\texttt{Linear}).
+
+\section{Sieć rekurencyjna LSTM}
+
+Model \texttt{LSTMRegressor} przetwarza tę samą reprezentację sekwencyjną
+co model konwolucyjny, poprzez warstwę projekcji wejścia, wielowarstwową
+sieć \texttt{LSTM} (z opcjonalną dwukierunkowością) oraz głowicę
+regresyjną operującą na ostatnim stanie ukrytym $h_T$ (lub konkatenacji
+ostatnich stanów obu kierunków w wariancie dwukierunkowym). Zarówno model
+konwolucyjny, jak i rekurencyjny wykorzystują ten sam mechanizm
+uczonej bramki selekcji cech, co model MLP.
+
+\section{Potoki danych}\label{sec:seqpipe}
+
+Dla modeli tabularycznych (GLM, modele drzewiaste, MLP) zaimplementowano
+klasę \texttt{FPLDataPipe}, opartą na \texttt{sklearn.ColumnTransformer}:
+cechy kategoryczne kodowane są metodą \emph{one-hot} (z odrzuceniem
+pierwszej kategorii referencyjnej) lub przekazywane bez zmian dla
+CatBoost, natomiast cechy numeryczne skalowane są metodą
+\texttt{MinMaxScaler}, dopasowywaną wyłącznie na zbiorze treningowym.
+
+Dla modeli sekwencyjnych (Conv1D, LSTM) zaimplementowano
+\texttt{SequenceDataPipe} wraz z klasą \texttt{SequenceDataset},
+budującą dla każdego zawodnika i sezonu osobno okna przesuwne długości
+$T=8$ kolejek: dla kolejki $t$ oknem wejściowym jest podsekwencja cech z
+kolejek $[t-T,\,t-1]$, a etykietą -- \texttt{total\_points} z kolejki
+$t$. Grupowanie po parze \texttt{(code, season)} zapobiega tworzeniu okien
+przekraczających granicę sezonu (transfer zawodnika, awans/spadek), co
+mogłoby wprowadzić nierealistyczną ciągłość formy.
+
+%======================================================================
+\chapter{Funkcja straty i metryki specyficzne dla FPL}\label{ch:loss}
+
+\section{Motywacja}
+
+Standardowy błąd średniokwadratowy (MSE) traktuje wszystkich zawodników
+symetrycznie, podczas gdy z perspektywy użytkownika FPL błędy predykcji
+dla zawodników \emph{premium} (drodzy, kluczowi dla wyniku drużyny) są
+znacznie bardziej kosztowne niż dla zawodników rezerwowych, a
+niedoszacowanie potencjału zawodnika (\emph{underprediction}) prowadzi do
+utraconych okazji transferowych w większym stopniu niż analogiczne
+przeszacowanie. Ponadto standardowy MSE nie uwzględnia faktu, że
+zawodnicy niewystępujący w danej kolejce (\texttt{minutes}$\,=0$) generują
+z definicji zerową punktację, co bez odpowiedniej wagi zniekształca
+gradient w kierunku trywialnej predykcji zera.
+
+\section{Funkcja straty \texttt{FPLLoss}}
+
+Zaprojektowana funkcja straty modyfikuje bazowy błąd średniokwadratowy
+trzema czynnikami wagowymi:
+
+\begin{equation}
+    \mathcal{L} = \frac{1}{N}\sum_{i=1}^{N} \big(y_i - \hat{y}_i\big)^2 \cdot w^{\text{cena}}_i \cdot w^{\text{asym}}_i \cdot \big(\text{minutes}_i + 0{,}1\big),
+\end{equation}
+gdzie:
+\begin{itemize}
+    \item \textbf{waga cenowa} $w^{\text{cena}}_i$ podbija istotność błędu
+    dla zawodników o cenie powyżej progu \texttt{p\_high} za pomocą miękkiej
+    (różniczkowalnej) maski sigmoidalnej:
+    \begin{equation}
+        w^{\text{cena}}_i = 1 + (w_{\text{premium}}-1)\cdot \sigma\!\big(20\cdot(\text{price}_i - p_{\text{high}})\big);
+    \end{equation}
+    \item \textbf{waga asymetrii} $w^{\text{asym}}_i$ silniej karze
+    niedoszacowanie ($y_i > \hat{y}_i$) niż przeszacowanie, poprzez funkcję
+    \texttt{softplus} zastosowaną do różnicy błędu:
+    \begin{equation}
+        w^{\text{asym}}_i = 1 + (c_{\text{under}}-1)\cdot \frac{\text{softplus}_\beta(y_i-\hat{y}_i)}{\text{softplus}_\beta(y_i-\hat{y}_i)+1}, \quad \beta=2;
+    \end{equation}
+    \item \textbf{waga minut} $(\text{minutes}_i+0{,}1)$ obniża wpływ
+    obserwacji zawodników niewystępujących w meczu, jednocześnie unikając
+    zerowania gradientu (stała $0{,}1$ zapobiega całkowitemu wyzerowaniu
+    wagi).
+\end{itemize}
+
+Progi cenowe $p_{\text{low}}$, $p_{\text{high}}$ wyznaczane są empirycznie
+jako, odpowiednio, mediana (50. percentyl) i 95,5. percentyl rozkładu ceny
+w zbiorze treningowym, po przeskalowaniu cechy do zakresu $[0,1]$.
+
+\section{Metryki segmentowane}
+
+Analogicznie do funkcji straty, ewaluacja modeli nie ogranicza się do
+zagregowanego MSE/MAE, lecz wykorzystuje autorskie metryki
+\texttt{CustomMSE} i \texttt{CustomMAE} (zaimplementowane jako klasy
+\texttt{torchmetrics.Metric}), raportujące błąd oddzielnie w trzech
+segmentach cenowych:
+\begin{equation}
+    \text{MSE@}k = \frac{1}{|S_k|}\sum_{i \in S_k} (y_i-\hat{y}_i)^2, \qquad k \in \{\text{budget}, \text{mid}, \text{premium}\},
+\end{equation}
+gdzie $S_{\text{budget}} = \{i: \text{price}_i < p_{\text{low}}\}$,
+$S_{\text{mid}} = \{i: p_{\text{low}} \leq \text{price}_i < p_{\text{high}}\}$,
+$S_{\text{premium}} = \{i: \text{price}_i \geq p_{\text{high}}\}$.
+Metryki te są zgodne implementacyjnie zarówno z modelami tabularycznymi
+(indeks ceny w wymiarze cech), jak i sekwencyjnymi (indeks ceny w
+ostatnim kroku czasowym okna), dzięki parametrowi \texttt{model\_type}
+(\texttt{"mlp"} / \texttt{"lstm"} / \texttt{"conv1d"}).
+
+Dodatkowo raportowany jest skorygowany współczynnik determinacji
+$R^2_{\text{adj}}$:
+\begin{equation}
+    R^2_{\text{adj}} = 1 - (1-R^2)\cdot\frac{n-1}{n-p-1},
+\end{equation}
+gdzie $n$ jest liczbą obserwacji, a $p$ liczbą cech, co koryguje $R^2$ o
+efekt liczby predyktorów i umożliwia rzetelne porównanie modeli o różnej
+wymiarowości wejścia.
+
+%======================================================================
+\chapter{Trenowanie modeli i strojenie hiperparametrów}\label{ch:training}
+
+\section{Podział danych}
+
+Podział na zbiór treningowy, walidacyjny i testowy wykonano w sposób
+chronologiczny, a nie losowy, co jest metodologicznie konieczne przy
+danych szeregów czasowych: sezony 2022/23 i 2023/24 stanowią zbiór
+treningowy, sezon 2024/25 -- zbiór walidacyjny, a bieżący sezon 2025/26 --
+zbiór testowy. Taki podział odwzorowuje rzeczywisty scenariusz użycia
+modelu (predykcja na danych z przyszłości względem danych treningowych) i
+eliminuje ryzyko wycieku informacji między sezonami.
+
+\section{Skalowanie zmiennej celu}
+
+Zmienna celu jest dodatkowo skalowana metodą \texttt{MinMaxScaler}
+(dopasowaną na zbiorze treningowym) przed treningiem sieci neuronowych, co
+stabilizuje proces optymalizacji; wszystkie raportowane metryki są
+obliczane po odwróceniu skalowania (\texttt{inverse\_transform}), a więc w
+oryginalnej skali punktowej.
+
+\section{Klasa \texttt{Trainer}}
+
+Uniwersalna klasa \texttt{Trainer} obsługuje trening wszystkich trzech
+architektur sieci neuronowych (MLP, Conv1D, LSTM) w oparciu o wspólny
+interfejs, obejmujący:
+\begin{itemize}
+    \item pętlę treningową i walidacyjną (\texttt{train\_step},
+    \texttt{test\_step}) z akumulacją metryk segmentowanych opisanych w
+    rozdziale~\ref{ch:loss};
+    \item wczesne zatrzymanie (\emph{early stopping}) na podstawie straty
+    walidacyjnej, z parametrem cierpliwości (\texttt{patience}) i
+    zachowaniem najlepszego stanu wag modelu;
+    \item harmonogram szybkości uczenia \texttt{ReduceLROnPlateau},
+    redukujący \emph{learning rate} po braku poprawy straty walidacyjnej
+    przez zadaną liczbę epok, z okresem chłodzenia (\texttt{cooldown}).
+\end{itemize}
+
+\section{Strojenie hiperparametrów modeli klasycznych}
+
+Dla modeli GLM, XGBoost i CatBoost strojenie hiperparametrów realizowane
+jest metodą \texttt{RandomizedSearchCV} z walidacją krzyżową
+\texttt{TimeSeriesSplit} (zachowującą porządek czasowy w obrębie kroswalidacji,
+w przeciwieństwie do standardowego podziału losowego $k$-krotnego),
+metryką optymalizacji \texttt{neg\_mean\_squared\_error} oraz $20$
+iteracjami losowania z przestrzeni hiperparametrów.
+
+\section{Śledzenie eksperymentów}
+
+Wszystkie eksperymenty (parametry, metryki epokowe, artefakty modeli)
+są rejestrowane w narzędziu MLflow za pośrednictwem klasy
+\texttt{MlflowTracker}, w tym metryki wsadowe logowane zbiorczo
+(\texttt{log\_metrics} per epoka) w celu ograniczenia liczby wywołań
+sieciowych do serwera śledzącego, co miało istotne znaczenie przy
+uruchamianiu treningów w środowisku obliczeniowym SSPCloud/Onyxia.
+
+%======================================================================
+\chapter{Wyniki i dyskusja}\label{ch:results}
+
+\emph{Niniejszy rozdział zostanie uzupełniony po zakończeniu pełnego cyklu
+eksperymentów dla wszystkich modeli opisanych w
+rozdziale~\ref{ch:models}.} Zalecana struktura rozdziału:
+
+\begin{itemize}
+    \item tabela zbiorcza porównująca modele (GLM, Random Forest, XGBoost,
+    CatBoost, MLP, Conv1D, LSTM) pod względem MSE, MAE oraz
+    $R^2_{\text{adj}}$, raportowanych łącznie oraz w podziale na segmenty
+    cenowe (budget/mid/premium) i pozycje zawodników;
+    \item krzywe uczenia (strata treningowa i walidacyjna w funkcji epoki)
+    dla modeli sieciowych, ilustrujące działanie mechanizmu wczesnego
+    zatrzymania;
+    \item analiza istotności cech (\emph{feature importance}) dla modeli
+    drzewiastych oraz wartości nauczonej bramki selekcji cech
+    ($\sigma(\mathbf{g})$) dla modeli sieciowych;
+    \item analiza błędów (rezydua predykcji) w podziale na segmenty
+    cenowe, weryfikująca skuteczność funkcji straty \texttt{FPLLoss} w
+    ograniczaniu niedoszacowania zawodników premium;
+    \item studium przypadku: predykcje dla wybranej kolejki bieżącego
+    sezonu, zestawione z rzeczywistymi wynikami.
+\end{itemize}
+
+\section*{TODO: warstwa stackingowa (meta-model)}
+\addcontentsline{toc}{section}{TODO: warstwa stackingowa (meta-model)}
+
+\noindent\fbox{\begin{minipage}{0.97\textwidth}
+\small
+\textbf{Status: sekcja planowana, do zaimplementowania i uzupełnienia
+wynikami.} Poniżej zebrano ustalenia projektowe dotyczące rozszerzenia
+architektury pracy o drugi poziom modelowania (\emph{stacked generalization}),
+które zostanie zaimplementowane i zewaluowane przed finalnym oddaniem
+pracy.
+\end{minipage}}
+
+\paragraph{Koncepcja.}
+Modele bazowe opisane w rozdziale~\ref{ch:models} (GLM, Random Forest,
+XGBoost, CatBoost, MLP, Conv1D, LSTM), potencjalnie trenowane na różnych
+wariantach funkcji straty (rozdział~\ref{ch:loss}), generują zróżnicowane,
+częściowo nieskorelowane wzorce błędów predykcji. Planuje się dodanie
+meta-modelu (docelowo prosty regularyzowany GLM/Ridge lub nieujemna
+kombinacja wypukła predykcji), przyjmującego jako cechy wejściowe
+predykcje modeli bazowych, a jako target -- rzeczywistą wartość
+\texttt{total\_points}.
+
+\paragraph{Krytyczne ryzyko: wyciek danych między poziomami.}
+Naiwne podejście (modele bazowe trenowane łącznie do sezonu 2025/26,
+meta-model testowany na tym samym sezonie) prowadzi do wycieku danych --
+predykcje modeli bazowych na zbiorze testowym byłyby wtedy \emph{in-sample},
+sztucznie zaniżając błąd. Przyjęta docelowa struktura trójpoziomowa:
+
+\begin{itemize}
+    \item \textbf{trening modeli bazowych}: sezony 2022/23 + 2023/24;
+    \item \textbf{trening meta-modelu}: predykcje \emph{out-of-fold}
+    zamrożonych modeli bazowych na sezonie 2024/25 jako cechy, z targetem
+    \texttt{total\_points} z tego samego sezonu;
+    \item \textbf{ewaluacja końcowa całego potoku} (baza + meta): sezon
+    2025/26, przy czym modele bazowe pozostają wytrenowane wyłącznie na
+    2022/23--2023/24 (bez doučenia na 2024/25 lub 2025/26 przed testem).
+\end{itemize}
+
+\paragraph{Rozszerzenie: walk-forward zamiast pojedynczego holdout.}
+Ze względu na ograniczoną liczbę sezonów treningowych dla meta-modelu
+(ryzyko przeuczenia przy silnie skorelowanych predykcjach modeli
+bazowych), rozważane jest zastąpienie pojedynczego holdout (2024/25)
+blokowym schematem walk-forward: trening bazy na 2022/23 $\rightarrow$
+predykcje OOF na 2023/24; trening bazy na 2022/23+2023/24
+$\rightarrow$ predykcje OOF na 2024/25; połączenie obu zbiorów OOF jako
+rozszerzony zbiór treningowy meta-modelu, z zachowaniem porządku
+czasowego.
+
+\paragraph{Projekt meta-modelu.}
+\begin{itemize}
+    \item silna regularyzacja (Ridge / Elastic Net w \texttt{glum}) ze
+    względu na współliniowość predykcji modeli bazowych;
+    \item wariant alternatywny: nieujemna kombinacja wypukła wag
+    ($w_j \geq 0$, $\sum_j w_j = 1$) -- mniej elastyczna, ale bardziej
+    interpretowalna i odporna na przeuczenie przy małej liczbie
+    obserwacji;
+    \item rozszerzenie typu \emph{feature-weighted stacking}: dodanie do
+    wejścia meta-modelu kontekstu (segment cenowy, pozycja, minuty z
+    poprzedniej kolejki), umożliwiające różnicowanie wag modeli bazowych
+    względem segmentu (np. większe zaufanie do CatBoost dla obrońców, do
+    LSTM dla napastników).
+\end{itemize}
+
+\paragraph{Baseline i istotność statystyczna.}
+Cały potok (baza + meta) zostanie porównany nie tylko wewnętrznie, ale
+także z: (i) oficjalnym \texttt{xP} (\emph{expected points}) dostarczanym
+przez FPL, obecnym już w zbiorze danych, jako punktem odniesienia
+praktycznej użyteczności, oraz (ii) prostym uśrednieniem predykcji
+modeli bazowych, jako punktem odniesienia dla oceny, czy nauczony
+meta-model wnosi wartość ponad naiwny blend. Różnice w metrykach błędu
+między wariantami zostaną ocenione testem istotności statystycznej
+(test Diebolda--Mariano lub bootstrap na poziomie kolejek), ze względu na
+ograniczoną liczbę sezonów testowych.
+
+\paragraph{Uwagi dot. wdrożenia (poza zakresem ewaluacji offline).}
+Docelowo modele bazowe i meta-model będą wersjonowane łącznie w MLflow
+Model Registry (retrening meta-modelu przy każdej zmianie warstwy bazowej),
+a predykcje generowane cyklicznie (raz na kolejkę) w ramach zaplanowanego
+zadania wsadowego, bez potrzeby wnioskowania w czasie rzeczywistym.
+
+
+\chapter{Wybór składu --- problem plecakowy}\label{ch:squad}
+
+%======================================================================
+\chapter{Decyzje dotyczące składu i system rekomendacji}\label{ch:recommender}
+%======================================================================
+\chapter*{Podsumowanie}
+\addcontentsline{toc}{chapter}{Podsumowanie}
+
+W pracy zaprojektowano i zaimplementowano kompletny potok predykcji
+punktacji zawodników Fantasy Premier League, obejmujący automatyczne
+pozyskiwanie i integrację danych z trzech niezależnych źródeł,
+eksploracyjną analizę danych z wykorzystaniem metod statystycznych
+odpornych na nienormalność rozkładów (korelacja Spearmana, test
+Kruskala–Wallisa), inżynierię cech respektującą rygor braku wycieku
+informacji z przyszłości oraz porównanie trzech rodzin modeli uczenia
+maszynowego o rosnącej złożoności. Istotnym wkładem pracy jest
+zaprojektowanie funkcji straty \texttt{FPLLoss} oraz towarzyszących jej
+metryk segmentowanych względem ceny rynkowej zawodnika, odzwierciedlających
+asymetryczną użyteczność decyzyjną błędu predykcji z perspektywy
+rzeczywistego użytkownika gry.
+
+Do naturalnych kierunków dalszego rozwoju systemu należą: (i) budowa
+modelu zespołowego (\emph{ensemble}) łączącego predykcje modeli
+tabularycznych i sekwencyjnych, (ii) uwzględnienie dodatkowych źródeł
+danych (np. statystyk zaawansowanych typu \emph{expected threat},
+danych o składach wyjściowych ogłaszanych przed meczem), (iii)
+przeniesienie modelu do trybu wnioskowania \emph{online}, z cotygodniową
+douczaniem na najświeższych danych bieżącego sezonu, oraz (iv)
+rozszerzenie zadania predykcyjnego o element optymalizacji doboru składu
+drużyny w ramach ograniczeń budżetowych gry (zadanie programowania
+całkowitoliczbowego na predykcjach modelu).
+
+ \begin{thebibliography}{9}
+ \bibitem{panek}
+ E. Panek, \emph{Ekonomia matematyczna}, Akademia Ekonomiczna w Poznaniu,
+ Poznań 2003.
+ \bibitem{fpl_vaastav}
+ Vaastav Anand, \emph{Fantasy-Premier-League} -- repozytorium danych
+ historycznych FPL, \url{https://github.com/vaastav/Fantasy-Premier-League}.
+ \bibitem{football_data}
+ \emph{Football-Data.co.uk} -- historyczne kursy bukmacherskie lig
+ piłkarskich, \url{https://www.football-data.co.uk}.
+ \bibitem{tobyddb}
+ % miejsce na literaturę przedmiotu dot. modelowania statystycznego w piłce
+ % nożnej / fantasy sports -- do uzupełnienia konkretnymi pozycjami
+ \ldots
+ \end{thebibliography}
+  
+ \end{document}

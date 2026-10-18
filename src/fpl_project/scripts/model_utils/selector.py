@@ -95,6 +95,9 @@ class ModelSelector:
         columns_list = list(X_train.columns) if hasattr(X_train, "columns") else []
 
         for model, name, grid in zip(models, models_names, params_grid):
+            if isinstance(model, CatBoostRegressor):
+                model.set_params(allow_writing_files=False)
+
             random_search = RandomizedSearchCV(cv=TimeSeriesSplit(n_splits=cv),
                                                n_iter=n_iter,
                                                estimator=model,

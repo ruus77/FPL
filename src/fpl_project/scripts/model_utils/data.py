@@ -7,19 +7,22 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
 
 
-def train_test_split(df: pd.DataFrame)->dict[str, pd.DataFrame | pd.Series]:
+def train_test_split(df: pd.DataFrame)-> dict[str, pd.DataFrame | pd.Series]:
     df = df.copy()
     X = df.drop(columns=["total_points"])
     y = df["total_points"]
 
-    train_mask = (X.season.isin([2223, 2324]))
-    valid_mask = (X.season == 2425)
-    test_mask = (X.season == 2526)
+    played = df["is_played"].astype(bool) if "is_played" in df.columns else y.notna()
+
+    train_mask = (X.season.isin([2223, 2324, 2425])) & played
+    valid_mask = (X.season == 2526) & played
+    test_mask = (X.season == 2627) & played
 
     return {
         "X_train": X[train_mask], "y_train": y[train_mask],
         "X_valid": X[valid_mask], "y_valid": y[valid_mask],
-        "X_test": X[test_mask], "y_test": y[test_mask]
+        "X_test": X[test_mask], "y_test": y[test_mask],
+        "X_predict": X[~played],
     }
 
 
@@ -79,37 +82,37 @@ class FPLDataPipe:
             torch.tensor(y.to_numpy().reshape(-1, 1), dtype=torch.float32)
         )
 
-    def prepare_data(self, X_train, y_train, X_valid, y_valid, X_test, y_test):
+    def prepare_data(self, X_train, y_train, X_valid, y_valid, X_test, y_test, X_predict=None):
         X_train = self.preprocessor.fit_transform(X_train)
         X_valid = self.preprocessor.transform(X_valid)
         X_test = self.preprocessor.transform(X_test)
+        X_pred = self.preprocessor.transform(X_predict) if X_predict is not None and not X_predict.empty else None
 
         if self.catboost_flag:
             X_train[self.cat_cols] = X_train[self.cat_cols].astype(str)
             X_valid[self.cat_cols] = X_valid[self.cat_cols].astype(str)
             X_test[self.cat_cols] = X_test[self.cat_cols].astype(str)
+            if X_pred is not None:
+                X_pred[self.cat_cols] = X_pred[self.cat_cols].astype(str)
 
         X_train_tensor, y_train_tensor = self._to_tensor(X_train, y_train)
         X_valid_tensor, y_valid_tensor = self._to_tensor(X_valid, y_valid)
         X_test_tensor, y_test_tensor = self._to_tensor(X_test, y_test)
+        self.X_predict_tensor = torch.tensor(X_pred.to_numpy(), dtype=torch.float32) if X_pred is not None else None
 
-        self.train_dataloader = DataLoader(TensorDataset(X_train_tensor, y_train_tensor), batch_size=self.batch_size, shuffle=True)
+        self.train_dataloader = DataLoader(TensorDataset(X_train_tensor, y_train_tensor), batch_size=self.batch_size, shuffle=False)
         self.valid_dataloader = DataLoader(TensorDataset(X_valid_tensor, y_valid_tensor), batch_size=self.batch_size, shuffle=False)
         self.test_dataloader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=self.batch_size, shuffle=False)
+        if self.X_predict_tensor is not None:
+            dummy_y = torch.zeros((len(self.X_predict_tensor), 1), dtype=torch.float32)
+            self.predict_dataloader = DataLoader(TensorDataset(self.X_predict_tensor, dummy_y), batch_size=self.batch_size, shuffle=False)
+        else:
+            self.predict_dataloader = None
 
     def get_dataloaders(self):
         return self.train_dataloader, self.valid_dataloader, self.test_dataloader
 
 class SequenceDataset(Dataset):
-    """
-    Buduje okna sekwencyjne z szeregów czasowych gracza.
-
-    Dla każdego gracza sortuje kolejki i tworzy pary:
-        X: cechy z kolejek [t - seq_len, ..., t-1]  →  shape (seq_len, n_features)
-        y: total_points z kolejki t
-
-    Okno NIE zawiera kolejki t → zero data leakage.
-    """
 
     def __init__(self,
                  df: pd.DataFrame,
@@ -118,23 +121,71 @@ class SequenceDataset(Dataset):
                  seq_len: int = 8,
                  player_col: str = "code",
                  time_col: str = "gw",
-                 season_col: str = "season"):
+                 season_col: str = "season",
+                 history_df: pd.DataFrame | None = None):
         self.seq_len = seq_len
         self.feature_cols = feature_cols
-        self.sequences: list[tuple[np.ndarray, float]] = []
+        n_features = len(feature_cols)
 
-        df = df.copy().sort_values([player_col, season_col, time_col]).reset_index(drop=True)
+        if history_df is not None and not history_df.empty:
+            df_indexed = df.copy()
+            df_indexed["_orig_pos"] = np.arange(len(df_indexed), dtype=np.int64)
+            if target_col not in df_indexed.columns:
+                df_indexed[target_col] = 0.0
+            else:
+                df_indexed[target_col] = df_indexed[target_col].fillna(0.0)
 
-        for (player, season), grp in df.groupby([player_col, season_col], sort=False):
-            feats = grp[feature_cols].values.astype(np.float32)  # (T, F)
-            target = grp[target_col].values.astype(np.float32)  # (T,)
+            df_sorted = df_indexed.sort_values([player_col, season_col, time_col]).reset_index(drop=True)
 
-            # Normalizacja cech wewnątrz gracza (zapobiega scale shift między sezonami)
-            # Używamy min-max na oknie historycznym — fit wyłącznie na przeszłości
-            for t in range(seq_len, len(grp)):
-                window = feats[t - seq_len: t]  # (seq_len, F) — tylko przeszłość
-                label = target[t]  # wartość przyszła
-                self.sequences.append((window, label))
+            hist_sorted = history_df.copy().sort_values([player_col, season_col, time_col])
+            hist_sorted["_orig_pos"] = -1
+            if target_col not in hist_sorted.columns:
+                hist_sorted[target_col] = 0.0
+
+            hist_tails = {
+                player: grp.tail(seq_len)
+                for player, grp in hist_sorted.groupby(player_col, sort=False)
+            }
+
+            ordered_sequences: list[tuple[np.ndarray, float] | None] = [None] * len(df_indexed)
+
+            for player, grp in df_sorted.groupby(player_col, sort=False):
+                hist_grp = hist_tails.get(player)
+                if hist_grp is not None and not hist_grp.empty:
+                    combined = pd.concat([hist_grp, grp], ignore_index=True)
+                    n_hist = len(hist_grp)
+                else:
+                    combined = grp.reset_index(drop=True)
+                    n_hist = 0
+
+                feats = combined[feature_cols].values.astype(np.float32)
+                target = combined[target_col].values.astype(np.float32)
+                orig_positions = combined["_orig_pos"].values
+
+                for t in range(n_hist, len(combined)):
+                    if t >= seq_len:
+                        window = feats[t - seq_len: t]
+                    elif t > 0:
+                        pad = np.zeros((seq_len - t, n_features), dtype=np.float32)
+                        window = np.vstack([pad, feats[:t]])
+                    else:
+                        window = np.zeros((seq_len, n_features), dtype=np.float32)
+
+                    label = float(target[t])
+                    ordered_sequences[int(orig_positions[t])] = (window, label)
+
+            self.sequences = ordered_sequences
+        else:
+            self.sequences: list[tuple[np.ndarray, float]] = []
+            df = df.copy().sort_values([player_col, season_col, time_col]).reset_index(drop=True)
+            for (player, season), grp in df.groupby([player_col, season_col], sort=False):
+                feats = grp[feature_cols].values.astype(np.float32)
+                target = grp[target_col].values.astype(np.float32)
+
+                for t in range(seq_len, len(grp)):
+                    window = feats[t - seq_len: t]
+                    label = target[t]
+                    self.sequences.append((window, label))
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -151,9 +202,6 @@ class SequenceDataPipe:
                  seq_len: int = 8,
                  batch_size: int = 256,
                  model_type: str = "lstm"):
-        """
-        model_type: 'lstm' → (B, T, F)  |  'conv1d' → (B, F, T)
-        """
         self.feature_cols = feature_cols
         self.seq_len = seq_len
         self.batch_size = batch_size
@@ -164,6 +212,7 @@ class SequenceDataPipe:
         self.train_dl: DataLoader | None = None
         self.valid_dl: DataLoader | None = None
         self.test_dl: DataLoader | None = None
+        self.predict_dl: DataLoader | None = None
 
     def _scale_df(self, df: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
         df = df.copy()
@@ -176,22 +225,22 @@ class SequenceDataPipe:
         return df
 
     def _collate(self, batch):
-        """Dostosowuje kształt tensora do wymaganego przez model."""
         xs, ys = zip(*batch)
-        X = torch.stack(xs)  # (B, T, F)
-        y = torch.cat(ys)  # (B, 1)
+        X = torch.stack(xs)
+        y = torch.cat(ys)
         if self.model_type == "conv1d":
-            X = X.permute(0, 2, 1)  # (B, F, T)
+            X = X.permute(0, 2, 1)
         return X, y
 
     def prepare_data(self,
                      X_train: pd.DataFrame, y_train: pd.Series | pd.DataFrame,
                      X_valid: pd.DataFrame, y_valid: pd.Series | pd.DataFrame,
-                     X_test: pd.DataFrame, y_test: pd.Series | pd.DataFrame):
+                     X_test: pd.DataFrame, y_test: pd.Series | pd.DataFrame,
+                     X_predict: pd.DataFrame | None = None):
 
         def merge(X, y):
-            """Łączy X i y — y może być Series lub DataFrame."""
             y_series = y["total_points"] if isinstance(y, pd.DataFrame) else y
+            y_series = y_series.copy()
             y_series.name = "total_points"
             return X.join(y_series)
 
@@ -199,21 +248,46 @@ class SequenceDataPipe:
         valid_df = merge(X_valid, y_valid)
         test_df = merge(X_test, y_test)
 
-        # Skalowanie: fit tylko na treningowych
         train_df = self._scale_df(train_df, fit=True)
         valid_df = self._scale_df(valid_df, fit=False)
         test_df = self._scale_df(test_df, fit=False)
 
         train_ds = SequenceDataset(train_df, self.feature_cols, seq_len=self.seq_len)
-        valid_ds = SequenceDataset(valid_df, self.feature_cols, seq_len=self.seq_len)
-        test_ds = SequenceDataset(test_df, self.feature_cols, seq_len=self.seq_len)
+        valid_ds = SequenceDataset(valid_df, self.feature_cols, seq_len=self.seq_len, history_df=train_df)
+        full_hist_for_test = pd.concat([train_df, valid_df], ignore_index=True)
+        test_ds = SequenceDataset(
+            test_df,
+            self.feature_cols,
+            seq_len=self.seq_len,
+            history_df=full_hist_for_test,
+        )
+
+        if X_predict is not None and not X_predict.empty:
+            predict_df = X_predict.copy()
+            predict_df["total_points"] = 0.0
+            predict_df = self._scale_df(predict_df, fit=False)
+            full_hist_for_pred = pd.concat([train_df, valid_df, test_df], ignore_index=True)
+            predict_ds = SequenceDataset(
+                predict_df,
+                self.feature_cols,
+                seq_len=self.seq_len,
+                history_df=full_hist_for_pred,
+            )
+            self.predict_dl = DataLoader(
+                predict_ds,
+                batch_size=self.batch_size,
+                shuffle=False,
+                collate_fn=self._collate,
+            )
+        else:
+            self.predict_dl = None
 
         print(f"[SequenceDataPipe/{self.model_type}]  "
               f"train={len(train_ds)}  valid={len(valid_ds)}  test={len(test_ds)}  "
               f"seq_len={self.seq_len}")
 
         self.train_dl = DataLoader(train_ds, batch_size=self.batch_size,
-                                   shuffle=True, collate_fn=self._collate, drop_last=True)
+                                   shuffle=False, collate_fn=self._collate, drop_last=True)
         self.valid_dl = DataLoader(valid_ds, batch_size=self.batch_size,
                                    shuffle=False, collate_fn=self._collate)
         self.test_dl = DataLoader(test_ds, batch_size=self.batch_size,
