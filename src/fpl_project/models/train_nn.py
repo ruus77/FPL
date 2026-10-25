@@ -14,7 +14,10 @@ import torch.optim
 
 from fpl_project.scripts import config
 from fpl_project.scripts.data_utils.features_config import FeaturesConfig
-from fpl_project.scripts.data_utils.features_processing import sort_data
+from fpl_project.scripts.data_utils.features_processing import (
+    build_and_save_features_engineering_data,
+    sort_data,
+)
 from fpl_project.scripts.model_utils.data import (
     FPLDataPipe,
     SequenceDataPipe,
@@ -83,6 +86,12 @@ class ModelConfig(NamedTuple):
 
 
 hipers = TrainingHyperparameters()
+
+if not config.EDA.exists():
+    from fpl_project.data_processing.data_import import fetch_and_save_eda_data
+    fetch_and_save_eda_data()
+if not config.FEATURES_ENGINEERING.exists():
+    build_and_save_features_engineering_data()
 
 data = sort_data(pd.read_parquet(config.FEATURES_ENGINEERING))
 data.total_points = data.total_points.clip(lower=0)

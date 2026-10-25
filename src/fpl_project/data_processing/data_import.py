@@ -465,32 +465,48 @@ class MergeData:
         df["season"] = df["season"].astype(float)
         df.drop(columns=['was_home_x', 'opponent_team_x'], inplace=True)
         df.rename(columns={'was_home_y': 'was_home',
-                           'opponent_team_y': 'opponent_team'}, inplace=True)
+                           'opponent_team_y': 'opponent_team',
+                           'expected_goals_conceded': 'xg_conceded',
+                           'expected_goals': 'xg',
+                           'expected_goal_involvements': 'xg_involvements',
+                           'team_expected_points': 'team_xp',
+                           'opp_expected_points': 'opp_xp',
+                           'expected_assists': 'xa'}, inplace=True)
+
+        df = df.loc[df["position"] != "AM"].reset_index(drop=True)
+
+        minutes = pd.to_numeric(df["minutes"], errors="coerce").replace(0, np.nan)
+        for col in ["xa", "xg_involvements", "xg", "xg_conceded"]:
+            if col in df.columns:
+                num_col = pd.to_numeric(df[col], errors="coerce")
+                res = (num_col / (minutes / 90.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                df[f"{col}_per_90"] = res.astype(float)
 
         num_cols = df.select_dtypes(include=np.number).columns
         df[num_cols] = df[num_cols].fillna(df[num_cols].median())
-        
+        df = df.sort_values(by=["code", "kickoff_time", "season", "gw"]).reset_index(drop=True)
+
         return df
 
     def get_data(self) -> pd.DataFrame:
         df = self._elo_betting_vaastav()
         return df
 
-if __name__ == "__main__":
 
+def fetch_and_save_eda_data() -> pd.DataFrame:
     content_cfg = ContentConfig()
-    
+
     vaastav_fetcher = FetchVaastav(config_data=content_cfg)
-    fci_fetcher = FetchFCI(config_data=content_cfg) 
+    fci_fetcher = FetchFCI(config_data=content_cfg)
     betting_fetcher = FetchBetting(config_data=content_cfg)
-    
+
     vaastav_df = vaastav_fetcher.get_data()
     fci_df = fci_fetcher.get_data()
     betting_df = betting_fetcher.get_data()
 
     merger = MergeData(vaastav_df=vaastav_df, betting_df=betting_df, fci_df=fci_df)
     data = merger.get_data()
-    
+
     print("--- DIAGNOSTICS ---")
     print(f"Vaastav shape: {vaastav_df.shape}")
     print(f"FCI shape: {fci_df.shape}")
@@ -506,4 +522,10 @@ if __name__ == "__main__":
     print(f"Total Duplicates: {data.duplicated().sum()}")
     print("-------------------")
 
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     data.to_parquet(config.EDA, index=False)
+    return data
+
+
+if __name__ == "__main__":
+    fetch_and_save_eda_data()
