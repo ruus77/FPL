@@ -152,8 +152,10 @@ def create_model_instance(model_name: str, dropout: float = 0.2) -> nn.Module:
 
 
 feature_names_mlp = list(fpl_pipe_mlp.preprocessor.get_feature_names_out())
-value_col_name_mlp = [c for c in feature_names_mlp if "value" in c][0]
-minutes_col_name_mlp = [c for c in feature_names_mlp if "minutes" in c][0]
+value_col_name_mlp = "num__value_ema_3"
+minutes_col_name_mlp = "num__minutes_ema_3"
+assert value_col_name_mlp in feature_names_mlp, f"Brak kolumny {value_col_name_mlp}"
+assert minutes_col_name_mlp in feature_names_mlp, f"Brak kolumny {minutes_col_name_mlp}"
 
 value_idx_mlp = feature_names_mlp.index(value_col_name_mlp)
 value_idx_seq = seq_feature_cols.index("value")
@@ -546,17 +548,12 @@ if __name__ == "__main__":
                     model_type=setup.model_type,
                     w_mid=1.25,
                     w_premium=2.0,
-                    under_predict_penalty=1.25,
-                    m_threshold=setup.m_threshold,
-                    w_minutes=1.5,
-                    sharpness=30.0,
+                    eps_min=0.1,
                 ),
                 {
                     "w_mid": 1.25,
                     "w_premium": 2.0,
-                    "under_predict_penalty": 1.25,
-                    "w_minutes": 1.5,
-                    "sharpness": 30.0,
+                    "eps_min": 0.1,
                 },
             ),
             "MSELoss": (MSELossWrapper(), {}),

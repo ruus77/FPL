@@ -134,30 +134,42 @@ class LSTMRegressor(nn.Module):
 
 
 class FPLLoss(nn.Module):
+    r"""Jawna, ważona strata MSE dla FPL.
+
+    L = mean( w_i * (y_i - yhat_i)^2 ),
+    w_i = w_price(price_i) * (ln(1 + m_i) + eps_min)
+
+    gdzie w_price = 1          dla price <  p_low,
+                    w_mid      dla p_low <= price < p_high,
+                    w_premium  dla price >= p_high   (twarde progi).
+
+    price i m to cena i minuty (przeskalowane) z cech MLP albo z ostatniego kroku
+    okna (lstm/conv1d); przy use_ema_minutes=True m to EMA3 minut z 3 ostatnich
+    kroków okna (tylko sekwencje). Wagi dzielone przez stałą `norm_const`
+    (domyślnie 1.0 = brak normalizacji).
+    """
+
     def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,
                  model_type: str = "mlp",
                  w_mid: float = 1.25,
                  w_premium: float = 2.0,
-                 under_predict_penalty: float = 1.25,
-                 m_threshold: float = 60.0 / 90.0,
-                 w_minutes: float = 1.5,
-                 sharpness: float = 30.0):
+                 eps_min: float = 0.1,
+                 norm_const: float = 1.0,
+                 use_ema_minutes: bool = False):
         super().__init__()
+        if model_type not in ("mlp", "lstm", "conv1d"):
+            raise ValueError(f"Nieznany model_type: {model_type}")
         self.p_low = p_low
         self.p_high = p_high
         self.value_idx = value_idx
         self.minutes_idx = minutes_idx
         self.model_type = model_type
 
-        self.m_threshold = m_threshold / 90.0 if m_threshold > 1.0 else m_threshold
-        self.sharpness = sharpness
-
         self.w_mid = w_mid
         self.w_premium = w_premium
-        self.under_predict_penalty = under_predict_penalty
-        self.w_minutes = w_minutes
-
-        self.mse = nn.MSELoss(reduction='none')
+        self.eps_min = eps_min
+        self.norm_const = norm_const
+        self.use_ema_minutes = use_ema_minutes
 
     def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
         if self.model_type == "mlp":
@@ -167,35 +179,28 @@ class FPLLoss(nn.Module):
         else:
             raise ValueError(f"Nieznany model_type: {self.model_type}")
 
+    def _get_minutes(self, x: torch.Tensor) -> torch.Tensor:
+        if self.use_ema_minutes and self.model_type in ("lstm", "conv1d"):
+            seq = x[:, -3:, self.minutes_idx]
+            alpha = 0.5  # EMA3: span=3
+            m = seq[:, 0]
+            for t in range(1, seq.shape[1]):
+                m = alpha * seq[:, t] + (1 - alpha) * m
+            return m
+        return self._get_feature(x, self.minutes_idx)
+
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         y_pred = y_pred.flatten()
         y_true = y_true.flatten()
 
         price = self._get_feature(x, self.value_idx)
-        minutes = self._get_feature(x, self.minutes_idx)
+        minutes = self._get_minutes(x)
 
-        base_loss = self.mse(y_pred, y_true)
+        w_price = torch.ones_like(price)
+        w_price = torch.where(price >= self.p_low, torch.full_like(price, self.w_mid), w_price)
+        w_price = torch.where(price >= self.p_high, torch.full_like(price, self.w_premium), w_price)
 
-        mid_soft_mask = torch.sigmoid((price - self.p_low) * self.sharpness)
-        premium_soft_mask = torch.sigmoid((price - self.p_high) * self.sharpness)
-        price_weights = (
-            1.0
-            + (self.w_mid - 1.0) * mid_soft_mask
-            + (self.w_premium - self.w_mid) * premium_soft_mask
-        )
+        w_min = torch.log1p(minutes.clamp(min=0.0)) + self.eps_min
+        weights = (w_price * w_min / self.norm_const).detach()
 
-        if self.under_predict_penalty > 1.0:
-            error_diff = y_true - y_pred
-            under_predict_signal = nn.functional.softplus(error_diff, beta=2.0)
-            asymmetry_weight = 1.0 + (self.under_predict_penalty - 1.0) * (
-                under_predict_signal / (under_predict_signal + 1.0)
-            )
-        else:
-            asymmetry_weight = 1.0
-
-        minutes_soft_mask = torch.sigmoid((minutes - self.m_threshold) * self.sharpness)
-        minutes_weights = 1.0 + (self.w_minutes - 1.0) * minutes_soft_mask
-
-        loss = base_loss * price_weights * asymmetry_weight * minutes_weights
-
-        return loss.mean()
+        return (weights * (y_true - y_pred) ** 2).mean()
