@@ -13,7 +13,6 @@
     urlcolor=black!30!cyan
 }
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-% pakiety matematyczne
 \usepackage{amsmath}
 \usepackage{amsthm}
 \usepackage{amssymb}
@@ -25,26 +24,22 @@
 \usepackage{caption}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Ustawienia wymiarów strony
 \usepackage{geometry}
  \geometry{
     paper=a4paper,
-    inner=30mm,         % Inner margin
-    outer=20mm,         % Outer margin
-    %bindingoffset=10mm, % Binding offset
+    inner=30mm,
+    outer=20mm,
     nohead,
-    top=20mm,           % Top margin
-    bottom=25mm,        % Bottom margin
+    top=20mm,
+    bottom=25mm,
     }
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-% komenda dodająca pustą stronę
 \newcommand\blankpage{%
     \null
     \thispagestyle{empty}%
     \addtocounter{page}{-1}%
     \newpage}
 %%%%%%%%%%%%%%%%%%%%%%%%%%
-% wprowadzenie środowisk dla twierdzeń, lematów, definicji i wniosków
 \theoremstyle{plain} \newtheorem{thm}{Twierdzenie}
 \theoremstyle{plain} \newtheorem{lem}{Lemat}
 \theoremstyle{definition} \newtheorem{defn}{Definicja}
@@ -58,40 +53,30 @@
     captionpos=b
 }
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Informacje na stronę tytułową
 \newcommand{\autor}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
 Samuel Rus}
-%
 \newcommand{\album}{\fontfamily{qhv}\fontshape{n}\selectfont
 \ldots\ldots}
-%
 \newcommand{\pltitle}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
 
 Wykorzystanie wybranych metod uczenia maszynowego w predykcji efektywności sportowej zawodników Premier League.}
-%
 \newcommand{\engtitle}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
 
 Predicting Premier League Player Performance Using Selected Machine Learning Methods}
-%
 \newcommand{\level}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE
 inżynierska}
-%
 \newcommand{\kierunek}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE
 Matematyka stosowana}
-%
 \newcommand{\promotor}{\fontfamily{qhv}\fontshape{n}\selectfont\large\bfseries
 dr Adam Sebastian Marszałek}
-%
 \newcommand{\spec}{\fontfamily{qhv}\fontshape{n}\selectfont\LARGE\bfseries
  Analiza danych}
-%
 \newcommand{\rok}{\fontfamily{qhv}\fontshape{n}\selectfont
 202\ldots}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{document}
-% Strona tytułowa
  \begin{titlepage}
  \thispagestyle{empty}
  \vspace*{3ex}
@@ -106,7 +91,7 @@ dr Adam Sebastian Marszałek}
 \smallskip
 
 \LARGE Wydział Informatyki i Matematyki}\hspace{0.3em}
- \parbox{0.2\textwidth}{\includegraphics[width=0.15\textwidth]{logoIT.png}}%\hspace{0.12em}
+ \parbox{0.2\textwidth}{\includegraphics[width=0.15\textwidth]{logoIT.png}}
 \parbox[c]{0.15\textwidth}
 
 \vspace{2ex}
@@ -138,7 +123,6 @@ dr Adam Sebastian Marszałek}
 \hspace{0.4\textwidth} \parbox{0.5\textwidth}{Praca przygotowana pod
 kierunkiem:
 \\
-%
 \bfseries \promotor}
 
 
@@ -149,7 +133,6 @@ kierunkiem:
 \newpage
 \blankpage
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Streszczenie / Abstract (styl arXiv)
 \pagenumbering{roman}
 
 \thispagestyle{empty}
@@ -197,7 +180,6 @@ regression, generalized linear models, XGBoost, CatBoost, neural
 networks, LSTM, loss function, stacking, sports analytics.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Spis treści
 \tableofcontents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \pagenumbering{arabic}
@@ -258,7 +240,7 @@ Szczegółowe zestawienie zasad punktacji z uwzględnieniem podziału na pozycje
 \begin{table}[!htbp]
 
 \renewcommand{\arraystretch}{0.92} 
-\resizebox{\linewidth}{!}{% zabezpiecza przed wyjściem tabeli poza marginesy
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{lcccc}
 \hline
 \textbf{Zdarzenie meczowe} & \textbf{Bramkarz} & \textbf{Obrońca} & \textbf{Pomocnik} & \textbf{Napastnik   } \\
@@ -375,7 +357,6 @@ powyżej/poniżej 2,5) i przekształca je w dwóch krokach:
     odwracany dla drużynygości.
 \end{enumerate}
 
-% Sekcja Pozyskiwanie ratingów Elo została usunięta
 
 \section{Łączenie źródeł (\texttt{MergeData})}
 \begin{figure}[htbp]
@@ -397,7 +378,6 @@ powyżej/poniżej 2,5) i przekształca je w dwóch krokach:
         }
     ]
 
-    % --- Górny rząd ---
     \node[source] (vaastav) {
         \textbf{\large Vaastav (repozytorium GitHub)} \\[0.2cm]
         \textbf{Opis:} Publiczne repozytorium agregujące oficjalne statystyki z gry FPL. \\[0.1cm]
@@ -424,10 +404,8 @@ powyżej/poniżej 2,5) i przekształca je w dwóch krokach:
         \end{itemize}
     };
 
-    % Punkt w połowie odstępu między blokami górnego rzędu (bez biblioteki calc)
     \path (vaastav.south east) -- (fci.south west) coordinate[midway] (mid);
 
-    % --- Środkowy rząd (wycentrowany) ---
     \node[source, below=1.5cm of mid] (betting) {
         \textbf{\large football-data.co.uk} \\[0.2cm]
         \textbf{Opis:} Serwis gromadzący kursy bukmacherskie z rynków 1X2 oraz linii bramkowych. \\[0.1cm]
@@ -441,14 +419,12 @@ powyżej/poniżej 2,5) i przekształca je w dwóch krokach:
         \end{itemize}
     };
 
-    % --- Zbiór docelowy ---
     \node[merge, below=1.7cm of betting] (dataset) {
         \textbf{\Large Zintegrowany zbiór danych} \\[0.2cm]
         \normalsize Zapis do formatu Parquet po asynchronicznym \\
         łączeniu (\texttt{merge\_asof}) i złączeniach wewnętrznych
     };
 
-    % --- Strzałki: górne bloki omijają środkowy bokiem ---
     \draw[arrow] (vaastav.west) -- ++(-0.5cm,0) |- (dataset.west);
     \draw[arrow] (fci.east)     -- ++(0.5cm,0)  |- (dataset.east);
     \draw[arrow] (betting.south) -- (dataset.north);
@@ -723,8 +699,8 @@ Dla modeli tabularycznych (GLM, modele drzewiaste, MLP) zaimplementowano
 klasę \texttt{FPLDataPipe}, opartą na \texttt{sklearn.ColumnTransformer}:
 cechy kategoryczne kodowane są metodą \emph{one-hot} (z odrzuceniem
 pierwszej kategorii referencyjnej) lub przekazywane bez zmian dla
-CatBoost, natomiast cechy numeryczne skalowane są metodą
-\texttt{MinMaxScaler}, dopasowywaną wyłącznie na zbiorze treningowym.
+CatBoost, natomiast cechy numeryczne standaryzowane są metodą
+\texttt{StandardScaler}, dopasowywaną wyłącznie na zbiorze treningowym.
 
 Dla modeli sekwencyjnych (Conv1D, LSTM) zaimplementowano
 \texttt{SequenceDataPipe} wraz z klasą \texttt{SequenceDataset},
@@ -781,7 +757,7 @@ gdzie:
 
 Progi cenowe $p_{\text{low}}$, $p_{\text{high}}$ wyznaczane są empirycznie
 jako, odpowiednio, mediana (50. percentyl) i 95,5. percentyl rozkładu ceny
-w zbiorze treningowym, po przeskalowaniu cechy do zakresu $[0,1]$.
+w zbiorze treningowym, po standaryzacji cechy.
 
 \section{Metryki segmentowane}
 
@@ -823,12 +799,12 @@ zbiór testowy. Taki podział odwzorowuje rzeczywisty scenariusz użycia
 modelu (predykcja na danych z przyszłości względem danych treningowych) i
 eliminuje ryzyko wycieku informacji między sezonami.
 
-\section{Skalowanie zmiennej celu}
+\section{Standaryzacja zmiennej celu}
 
-Zmienna celu jest dodatkowo skalowana metodą \texttt{MinMaxScaler}
+Zmienna celu jest dodatkowo standaryzowana metodą \texttt{StandardScaler}
 (dopasowaną na zbiorze treningowym) przed treningiem sieci neuronowych, co
 stabilizuje proces optymalizacji; wszystkie raportowane metryki są
-obliczane po odwróceniu skalowania (\texttt{inverse\_transform}), a więc w
+obliczane po odwróceniu standaryzacji (\texttt{inverse\_transform}), a więc w
 oryginalnej skali punktowej.
 
 \section{Klasa \texttt{Trainer}}
@@ -1015,8 +991,6 @@ całkowitoliczbowego na predykcjach modelu).
  \emph{Football-Data.co.uk} -- historyczne kursy bukmacherskie lig
  piłkarskich, \url{https://www.football-data.co.uk}.
  \bibitem{tobyddb}
- % miejsce na literaturę przedmiotu dot. modelowania statystycznego w piłce
- % nożnej / fantasy sports -- do uzupełnienia konkretnymi pozycjami
  \ldots
  \end{thebibliography}
   

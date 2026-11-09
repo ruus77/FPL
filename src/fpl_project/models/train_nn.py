@@ -82,7 +82,7 @@ class ModelConfig(NamedTuple):
     m_threshold: float
     model_type: str
     num_features: int
-    scaler: sklearn.preprocessing.MinMaxScaler
+    scaler: sklearn.preprocessing.StandardScaler
 
 
 hipers = TrainingHyperparameters()
@@ -165,15 +165,23 @@ minutes_idx_seq = seq_feature_cols.index("minutes")
 
 
 def calculate_scaled_minutes_threshold(
-    scaler: sklearn.preprocessing.MinMaxScaler,
+    scaler: sklearn.preprocessing.StandardScaler,
     col_idx: int,
     raw_minutes: float = 60.0,
 ) -> float:
-    data_min = float(scaler.data_min_[col_idx])
-    data_max = float(scaler.data_max_[col_idx])
-    if data_max <= data_min:
-        return raw_minutes / 90.0
-    return float(np.clip((raw_minutes - data_min) / (data_max - data_min), 0.0, 1.0))
+    if hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):
+        mean = float(scaler.mean_[col_idx])
+        scale = float(scaler.scale_[col_idx])
+        if scale <= 0:
+            return 0.0
+        return float((raw_minutes - mean) / scale)
+    elif hasattr(scaler, "data_min_") and hasattr(scaler, "data_max_"):
+        data_min = float(scaler.data_min_[col_idx])
+        data_max = float(scaler.data_max_[col_idx])
+        if data_max <= data_min:
+            return raw_minutes / 90.0
+        return float(np.clip((raw_minutes - data_min) / (data_max - data_min), 0.0, 1.0))
+    return raw_minutes / 90.0
 
 
 mlp_num_scaler = fpl_pipe_mlp.preprocessor.named_transformers_["num"].named_steps["scaler"]

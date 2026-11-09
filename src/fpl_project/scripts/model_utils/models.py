@@ -134,19 +134,19 @@ class LSTMRegressor(nn.Module):
 
 
 class FPLLoss(nn.Module):
-    r"""Jawna, ważona strata MSE dla FPL.
+    r"""Weighted MSE loss for FPL.
 
     L = mean( w_i * (y_i - yhat_i)^2 ),
     w_i = w_price(price_i) * (ln(1 + m_i) + eps_min)
 
-    gdzie w_price = 1          dla price <  p_low,
-                    w_mid      dla p_low <= price < p_high,
-                    w_premium  dla price >= p_high   (twarde progi).
+    where w_price = 1          for price <  p_low,
+                    w_mid      for p_low <= price < p_high,
+                    w_premium  for price >= p_high   (hard thresholds).
 
-    price i m to cena i minuty (przeskalowane) z cech MLP albo z ostatniego kroku
-    okna (lstm/conv1d); przy use_ema_minutes=True m to EMA3 minut z 3 ostatnich
-    kroków okna (tylko sekwencje). Wagi dzielone przez stałą `norm_const`
-    (domyślnie 1.0 = brak normalizacji).
+    price and m are standardized price and minutes from MLP features or from the last step
+    of the window (lstm/conv1d); with use_ema_minutes=True, m is EMA3 of minutes from the last 3
+    steps of the window (sequences only). Weights are divided by the constant `norm_const`
+    (default 1.0 = no normalization).
     """
 
     def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,

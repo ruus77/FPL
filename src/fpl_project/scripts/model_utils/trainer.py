@@ -31,7 +31,7 @@ class Trainer:
         p_high: float = 0.8,
         value_idx: int = 0,
         model_type: str = "mlp",
-        scaler: sklearn.preprocessing.MinMaxScaler = None,
+        scaler: sklearn.preprocessing.StandardScaler = None,
     ):
 
         torch.manual_seed(random_state)

@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
 def train_test_split(df: pd.DataFrame)-> dict[str, pd.DataFrame | pd.Series]:
@@ -26,9 +26,9 @@ def train_test_split(df: pd.DataFrame)-> dict[str, pd.DataFrame | pd.Series]:
     }
 
 
-def scale_target(splits: dict[str, pd.DataFrame | pd.Series]) -> tuple[dict[str, pd.DataFrame | pd.Series], MinMaxScaler]:
+def scale_target(splits: dict[str, pd.DataFrame | pd.Series]) -> tuple[dict[str, pd.DataFrame | pd.Series], StandardScaler]:
     splits = splits.copy()
-    scaler = MinMaxScaler()
+    scaler = StandardScaler()
     
     scaled_train = scaler.fit_transform(splits["y_train"].values.reshape(-1, 1))
     
@@ -54,7 +54,7 @@ class FPLDataPipe:
 
     def _build_pipeline(self):
         num_transform = Pipeline([
-            ("scaler", MinMaxScaler()),
+            ("scaler", StandardScaler()),
         ])
 
         if not self.catboost_flag:
@@ -206,7 +206,7 @@ class SequenceDataPipe:
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.model_type = model_type
-        self.scaler = MinMaxScaler()
+        self.scaler = StandardScaler()
         self._fitted = False
 
         self.train_dl: DataLoader | None = None
