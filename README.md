@@ -10,7 +10,6 @@
 An end-to-end Machine Learning research and decision-support project developed as part of an **Engineering Thesis** in **Applied Mathematics (Data Analysis)** at the **Cracow University of Technology (Politechnika Krakowska)**, Faculty of Computer Science and Telecommunications.
 
 * **Author:** Samuel Rus
-* **Supervisor:** dr Adam Sebastian Marszałek
 
 ---
 
