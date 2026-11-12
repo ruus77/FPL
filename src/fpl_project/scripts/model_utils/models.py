@@ -6,22 +6,6 @@ from torch import nn
 from fpl_project.scripts import config
 
 
-def compute_norm_const(
-    df_or_minutes: pd.DataFrame | pd.Series | np.ndarray,
-    minutes_col: str = "minutes_ema_3",
-    eps_min: float = config.EPS_MIN,
-) -> float:
-    """Compute normalization constant c = mean(ln(1 + m_i) + eps_min) on train."""
-    if isinstance(df_or_minutes, pd.DataFrame):
-        raw_min = df_or_minutes[minutes_col].to_numpy(dtype=np.float64) / 90.0
-    elif isinstance(df_or_minutes, pd.Series):
-        raw_min = df_or_minutes.to_numpy(dtype=np.float64) / 90.0
-    else:
-        raw_min = np.asarray(df_or_minutes, dtype=np.float64)
-    m_i = np.clip(raw_min, 0.0, 1.0)
-    return float(np.mean(np.log1p(m_i) + eps_min))
-
-
 def compute_fpl_weights(
     df: pd.DataFrame,
     p_low: float,
@@ -31,9 +15,8 @@ def compute_fpl_weights(
     w_mid: float = config.W_MID,
     w_premium: float = config.W_PREMIUM,
     eps_min: float = config.EPS_MIN,
-    norm_const: float = 1.0,
 ) -> np.ndarray:
-    """Compute FPLLoss sample weights: w_i = w_cena_i * (ln(1 + m_i) + eps_min) / c."""
+    """Compute FPLLoss sample weights: w_i = w_cena_i * (ln(1 + m_i) + eps_min)."""
     price = df[price_col].to_numpy(dtype=np.float64)
     minutes = np.clip(df[minutes_col].to_numpy(dtype=np.float64) / 90.0, 0.0, 1.0)
 
@@ -42,7 +25,7 @@ def compute_fpl_weights(
     w_price = np.where(price >= p_high, w_premium, w_price)
 
     w_min = np.log1p(minutes) + eps_min
-    weights = (w_price * w_min) / norm_const
+    weights = w_price * w_min
     return weights.astype(np.float64)
 
 
@@ -179,7 +162,7 @@ class LSTMRegressor(nn.Module):
 
 
 class FPLLoss(nn.Module):
-    """Weighted MSE loss for FPL: mean(w_i * (y_i - y_hat_i)^2)."""
+    """Weighted MSE loss for FPL: mean(w_i * (y_i - y_hat_i)^2) with w_i = w_cena_i * (ln(1 + m_i) + eps_min)."""
 
     def __init__(
         self,
@@ -191,7 +174,6 @@ class FPLLoss(nn.Module):
         w_mid: float = config.W_MID,
         w_premium: float = config.W_PREMIUM,
         eps_min: float = config.EPS_MIN,
-        norm_const: float = 1.0,
         use_ema_minutes: bool = False,
     ):
         super().__init__()
@@ -205,7 +187,6 @@ class FPLLoss(nn.Module):
         self.w_mid = w_mid
         self.w_premium = w_premium
         self.eps_min = eps_min
-        self.norm_const = norm_const
         self.use_ema_minutes = use_ema_minutes
 
     def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
@@ -248,5 +229,5 @@ class FPLLoss(nn.Module):
         w_price = torch.where(price >= self.p_high, torch.full_like(price, self.w_premium), w_price)
 
         w_min = torch.log1p(minutes) + self.eps_min
-        w = (w_price * w_min / self.norm_const).detach()
+        w = (w_price * w_min).detach()
         return (w * (y_true - y_pred) ** 2).mean()

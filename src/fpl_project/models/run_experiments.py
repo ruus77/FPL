@@ -33,7 +33,6 @@ from fpl_project.scripts.model_utils.models import (
     FPLLoss,
     MLP,
     compute_fpl_weights,
-    compute_norm_const,
 )
 from fpl_project.scripts.model_utils.selector import (
     ModelSelector,
@@ -67,7 +66,6 @@ class PreparedData:
     X_test_tab: pd.DataFrame
     p_low: float
     p_high: float
-    c_norm: float
     w_train: np.ndarray
     w_valid: np.ndarray
     w_test: np.ndarray
@@ -208,7 +206,6 @@ def run_verification_tests() -> None:
         "minutes_ema_3": [0.0, 30.0, 60.0, 85.0, 90.0],
     })
     p_low_t, p_high_t = 4.5, 7.0
-    c_t = compute_norm_const(toy_df, minutes_col="minutes_ema_3", eps_min=config.EPS_MIN)
     w_np = compute_fpl_weights(
         toy_df,
         p_low=p_low_t,
@@ -216,7 +213,6 @@ def run_verification_tests() -> None:
         w_mid=config.W_MID,
         w_premium=config.W_PREMIUM,
         eps_min=config.EPS_MIN,
-        norm_const=c_t,
     )
     loss_mod = FPLLoss(
         p_low=p_low_t,
@@ -227,7 +223,6 @@ def run_verification_tests() -> None:
         w_mid=config.W_MID,
         w_premium=config.W_PREMIUM,
         eps_min=config.EPS_MIN,
-        norm_const=c_t,
     )
     y_true_t = np.array([1.0, 2.0, 5.0, 8.0, 12.0], dtype=np.float32)
     y_pred_t = np.array([1.5, 1.0, 4.0, 6.0, 10.0], dtype=np.float32)
@@ -360,18 +355,16 @@ def load_data() -> PreparedData:
     price_train_raw = X_train_raw["value_ema_3"].to_numpy(dtype=np.float64)
     p_low = float(np.quantile(price_train_raw, config.PRICE_QUANTILE_LOW))
     p_high = float(np.quantile(price_train_raw, config.PRICE_QUANTILE_HIGH))
-    c_norm = compute_norm_const(X_train_raw, minutes_col="minutes_ema_3", eps_min=config.EPS_MIN)
 
-    w_train = compute_fpl_weights(X_train_raw, p_low=p_low, p_high=p_high, norm_const=c_norm)
-    w_valid = compute_fpl_weights(X_valid_raw, p_low=p_low, p_high=p_high, norm_const=c_norm)
-    w_test = compute_fpl_weights(X_test_raw, p_low=p_low, p_high=p_high, norm_const=c_norm)
+    w_train = compute_fpl_weights(X_train_raw, p_low=p_low, p_high=p_high)
+    w_valid = compute_fpl_weights(X_valid_raw, p_low=p_low, p_high=p_high)
+    w_test = compute_fpl_weights(X_test_raw, p_low=p_low, p_high=p_high)
 
     print("=" * 90)
     print("PARAMETRY FPLLoss (wyliczone na surowych kolumnach train):")
     print(f"  eps_min = {config.EPS_MIN}, w_mid = {config.W_MID}, w_premium = {config.W_PREMIUM}")
     print(f"  p_low (kwantyl {config.PRICE_QUANTILE_LOW:.2f} value_ema_3)  = {p_low:.4f} mln £")
     print(f"  p_high (kwantyl {config.PRICE_QUANTILE_HIGH:.3f} value_ema_3)= {p_high:.4f} mln £")
-    print(f"  Stała normalizująca c (norm_const)= {c_norm:.4f}")
     print(f"  Wagi w_train: mean={w_train.mean():.4f}, min={w_train.min():.4f}, max={w_train.max():.4f}")
     print("=" * 90)
 
@@ -520,7 +513,6 @@ def load_data() -> PreparedData:
         X_test_tab=X_test_tab,
         p_low=p_low,
         p_high=p_high,
-        c_norm=c_norm,
         w_train=w_train,
         w_valid=w_valid,
         w_test=w_test,
@@ -672,7 +664,6 @@ def train_neural_networks(
                     w_mid=config.W_MID,
                     w_premium=config.W_PREMIUM,
                     eps_min=config.EPS_MIN,
-                    norm_const=data.c_norm,
                 )
                 monitor_metric = "loss"
 
@@ -1061,7 +1052,6 @@ def log_results_to_mlflow(
                 "seed": config.SEED,
                 "p_low": data.p_low,
                 "p_high": data.p_high,
-                "norm_const_c": round(data.c_norm, 4),
                 "eps_min": config.EPS_MIN,
                 "w_mid": config.W_MID,
                 "w_premium": config.W_PREMIUM,
@@ -1171,10 +1161,11 @@ Stałe funkcji straty zdefiniowane w `src/fpl_project/scripts/config.py`:
 - `EPS_MIN` ($\\varepsilon_{{\\min}}$) = `{config.EPS_MIN}`
 - `W_MID` ($w_{{\\text{{mid}}}}$) = `{config.W_MID}`
 - `W_PREMIUM` ($w_{{\\text{{premium}}}}$) = `{config.W_PREMIUM}`
-- Stała normalizująca $c$ (`norm_const` $= \\text{{mean}}(\\ln(1 + m_i) + \\varepsilon_{{\\min}})$ na `train`, gdzie $m_i = \\text{{clip}}(\\text{{minutes\\_ema\\_3}} / 90, 0, 1)$): **`{data.c_norm:.4f}`**
 
-Wzór wagi obserwacji:
-$$w_i = \\frac{{w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + m_i) + \\varepsilon_{{\\min}})}}{{c}}, \\quad w_{{\\text{{cena}}, i}} \\in \\{{1.0, {config.W_MID}, {config.W_PREMIUM}\\}}, \\quad c = {data.c_norm:.4f}$$
+Wzór wagi obserwacji (gdzie $m_i = \\text{{clip}}(\\text{{minutes\\_ema\\_3}} / 90, 0, 1)$):
+$$w_i = w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + m_i) + \\varepsilon_{{\\min}}), \\quad w_{{\\text{{cena}}, i}} \\in \\{{1.0, {config.W_MID}, {config.W_PREMIUM}\\}}$$
+
+Ponieważ wagi $w_i$ nie są dzielone przez stałą normalizującą, wartości `FPLLoss` w tabelach są wyrażone w innej skali niż `MSE`.
 
 ## 4. Konfiguracja GLM (`glum`) i realizacja wariantu (B)
 - **Przestrzeń przeszukiwania GLM (`GLM_PARAM_GRID`)**:
