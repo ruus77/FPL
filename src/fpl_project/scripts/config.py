@@ -3,6 +3,15 @@ from dotenv import load_dotenv
 
 SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"]
 
+# Stałe funkcji straty FPLLoss
+EPS_MIN = 0.1
+W_MID = 1.25
+W_PREMIUM = 2.0
+
+eps_min = EPS_MIN
+w_mid = W_MID
+w_premium = W_PREMIUM
+
 load_dotenv()
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent

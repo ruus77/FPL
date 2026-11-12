@@ -4,15 +4,17 @@ import pandas as pd
 from torch import nn
 import torch
 
+from fpl_project.scripts import config
+
 
 def compute_norm_const(
     df_or_minutes: pd.DataFrame | pd.Series | np.ndarray,
     minutes_col: str = "minutes_ema_3",
-    eps_min: float = 0.1,
+    eps_min: float = config.EPS_MIN,
 ) -> float:
-    """Compute normalization constant c = mean(ln(1 + max(m_i, 0)) + eps_min) on train.
+    """Compute normalization constant c = mean(ln(1 + m_i) + eps_min) on train.
 
-    Here m_i = minutes_ema_3 / 90.0 in [0, 1] from the unscaled column.
+    Here m_i = clip(minutes_ema_3 / 90.0, 0.0, 1.0) from the unscaled column.
     """
     if isinstance(df_or_minutes, pd.DataFrame):
         raw_min = df_or_minutes[minutes_col].to_numpy(dtype=np.float64) / 90.0
@@ -20,8 +22,8 @@ def compute_norm_const(
         raw_min = df_or_minutes.to_numpy(dtype=np.float64) / 90.0
     else:
         raw_min = np.asarray(df_or_minutes, dtype=np.float64)
-    m_clipped = np.clip(raw_min, 0.0, 1.0)
-    return float(np.mean(np.log1p(np.maximum(m_clipped, 0.0)) + eps_min))
+    m_i = np.clip(raw_min, 0.0, 1.0)
+    return float(np.mean(np.log1p(m_i) + eps_min))
 
 
 def compute_fpl_weights(
@@ -30,13 +32,14 @@ def compute_fpl_weights(
     p_high: float,
     price_col: str = "value_ema_3",
     minutes_col: str = "minutes_ema_3",
-    w_mid: float = 1.25,
-    w_premium: float = 2.0,
-    eps_min: float = 0.1,
+    w_mid: float = config.W_MID,
+    w_premium: float = config.W_PREMIUM,
+    eps_min: float = config.EPS_MIN,
     norm_const: float = 1.0,
 ) -> np.ndarray:
     """Compute FPLLoss sample weights from unscaled columns:
-    price = value_ema_3 (in £m), minutes = minutes_ema_3 / 90.0 (in [0, 1]).
+    price = value_ema_3 (in £m), m_i = clip(minutes_ema_3 / 90.0, 0.0, 1.0).
+    Formula: w_i = w_cena_i * (ln(1 + m_i) + eps_min) / c.
     """
     price = df[price_col].to_numpy(dtype=np.float64)
     minutes = np.clip(df[minutes_col].to_numpy(dtype=np.float64) / 90.0, 0.0, 1.0)
@@ -45,7 +48,7 @@ def compute_fpl_weights(
     w_price = np.where(price >= p_low, w_mid, w_price)
     w_price = np.where(price >= p_high, w_premium, w_price)
 
-    w_min = np.log1p(np.maximum(minutes, 0.0)) + eps_min
+    w_min = np.log1p(minutes) + eps_min
     weights = (w_price * w_min) / norm_const
     return weights.astype(np.float64)
 
@@ -190,18 +193,18 @@ class FPLLoss(nn.Module):
                     w_mid      for p_low <= price < p_high,
                     w_premium  for price >= p_high   (hard thresholds).
 
-    price and m are standardized price and minutes from MLP features or from the last step
-    of the window (lstm/conv1d); with use_ema_minutes=True, m is EMA3 of minutes from the last 3
-    steps of the window (sequences only). Weights are divided by the constant `norm_const`
-    (default 1.0 = no normalization). Also supports passing precomputed 1D sample weights `x`
-    or `weights` directly so all models use identical unscaled weights from `compute_fpl_weights`.
+    price and m are unscaled price and minutes from auxiliary features (m_i in [0, 1]);
+    with use_ema_minutes=True, m is EMA3 of minutes from the last 3 steps of the window.
+    Weights are divided by the constant `norm_const` (default 1.0 = no normalization).
+    Also supports passing precomputed 1D sample weights `x` or `weights` directly so all
+    models use identical unscaled weights from `compute_fpl_weights`.
     """
 
     def __init__(self, p_low: float, p_high: float, value_idx: int = 0, minutes_idx: int = 1,
                  model_type: str = "mlp",
-                 w_mid: float = 1.25,
-                 w_premium: float = 2.0,
-                 eps_min: float = 0.1,
+                 w_mid: float = config.W_MID,
+                 w_premium: float = config.W_PREMIUM,
+                 eps_min: float = config.EPS_MIN,
                  norm_const: float = 1.0,
                  use_ema_minutes: bool = False):
         super().__init__()
@@ -253,7 +256,7 @@ class FPLLoss(nn.Module):
 
         if x is not None and x.ndim == 1:
             w = x.flatten().to(y_pred.device, dtype=y_pred.dtype).detach()
-            return (w * (y_true - y_pred) ** 2).mean()
+            return (w * (y_true - y_pred) ** 2).detach() if False else (w * (y_true - y_pred) ** 2).mean()
 
         price = self._get_feature(x, self.value_idx)
         minutes = self._get_minutes(x)
@@ -262,7 +265,7 @@ class FPLLoss(nn.Module):
         w_price = torch.where(price >= self.p_low, torch.full_like(price, self.w_mid), w_price)
         w_price = torch.where(price >= self.p_high, torch.full_like(price, self.w_premium), w_price)
 
-        w_min = torch.log1p(minutes.clamp(min=0.0)) + self.eps_min
+        w_min = torch.log1p(minutes) + self.eps_min
         w = (w_price * w_min / self.norm_const).detach()
 
         return (w * (y_true - y_pred) ** 2).mean()

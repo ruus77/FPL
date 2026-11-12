@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 import sys
 import time
@@ -10,7 +9,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import r2_score
 from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
@@ -54,6 +53,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 SEED = 77
+N_BOOTSTRAP = 2000
 
 
 class MSELossWrapper(nn.Module):
@@ -259,27 +259,226 @@ def evaluate_predictions(
     }
 
 
+def make_bootstrap_gw_weights(
+    gws: np.ndarray,
+    n_boot: int = N_BOOTSTRAP,
+    seed: int = SEED,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate paired cluster-bootstrap gameweek multiplicity matrix.
+
+    Samples whole gameweeks (gw) with replacement `n_boot` times using `seed`.
+    Returns:
+        unique_gws: sorted array of unique gameweeks of shape (G,)
+        gw_counts: integer matrix of shape (n_boot, G) with how many times each gw was drawn
+    """
+    unique_gws = np.sort(np.unique(np.asarray(gws)))
+    n_gws = len(unique_gws)
+    rng = np.random.default_rng(seed)
+    sampled_idx = rng.integers(0, n_gws, size=(n_boot, n_gws))
+    gw_counts = np.zeros((n_boot, n_gws), dtype=np.float64)
+    for b in range(n_boot):
+        gw_counts[b] = np.bincount(sampled_idx[b], minlength=n_gws)
+    return unique_gws, gw_counts
+
+
+def paired_gw_bootstrap_diff(
+    loss_a: np.ndarray,
+    loss_b: np.ndarray,
+    gws: np.ndarray,
+    mask: np.ndarray,
+    unique_gws: np.ndarray,
+    gw_counts: np.ndarray,
+) -> tuple[float, float, float, int]:
+    """Compute point difference mean(loss_a[mask]) - mean(loss_b[mask]) and 95% paired bootstrap CI over gameweeks."""
+    mask_bool = np.asarray(mask, dtype=bool)
+    n_obs = int(np.sum(mask_bool))
+    diff_vec = np.asarray(loss_a, dtype=np.float64) - np.asarray(loss_b, dtype=np.float64)
+    point_diff = float(np.mean(diff_vec[mask_bool]))
+
+    gws_arr = np.asarray(gws)
+    n_gws = len(unique_gws)
+    gw_sums = np.zeros(n_gws, dtype=np.float64)
+    gw_ns = np.zeros(n_gws, dtype=np.float64)
+
+    for idx_g, gw_val in enumerate(unique_gws):
+        m_g = mask_bool & (gws_arr == gw_val)
+        gw_ns[idx_g] = float(np.sum(m_g))
+        if gw_ns[idx_g] > 0:
+            gw_sums[idx_g] = float(np.sum(diff_vec[m_g]))
+
+    boot_num = gw_counts @ gw_sums
+    boot_den = np.maximum(gw_counts @ gw_ns, 1.0)
+    boot_diffs = boot_num / boot_den
+    ci_low, ci_high = np.percentile(boot_diffs, [2.5, 97.5])
+    return point_diff, float(ci_low), float(ci_high), n_obs
+
+
+def compute_tier_masks(price_raw: np.ndarray, p_low: float, p_high: float) -> dict[str, np.ndarray]:
+    price = np.asarray(price_raw, dtype=np.float64)
+    return {
+        "all": np.ones(len(price), dtype=bool),
+        "budget": price < p_low,
+        "mid": (price >= p_low) & (price < p_high),
+        "premium": price >= p_high,
+    }
+
+
+def compute_tier_counts_table(
+    splits_dict: dict[str, pd.DataFrame],
+    p_low: float,
+    p_high: float,
+) -> pd.DataFrame:
+    rows = []
+    for split_name, df_part in splits_dict.items():
+        masks = compute_tier_masks(df_part["value_ema_3"].to_numpy(dtype=np.float64), p_low, p_high)
+        rows.append({
+            "split": split_name,
+            "budget": int(np.sum(masks["budget"])),
+            "mid": int(np.sum(masks["mid"])),
+            "premium": int(np.sum(masks["premium"])),
+            "total": int(len(df_part)),
+        })
+    return pd.DataFrame(rows)
+
+
+def compute_variant_comparison_table(
+    test_df: pd.DataFrame,
+    p_low: float,
+    p_high: float,
+    n_boot: int = N_BOOTSTRAP,
+    seed: int = SEED,
+) -> pd.DataFrame:
+    """Compare FPLLoss vs MSE: difference = Metric(fplloss) - Metric(mse) with 95% paired gw-bootstrap CI."""
+    models_to_compare = ["glm", "xgboost", "mlp", "conv1d", "meta_nnls", "meta_context"]
+    y_true = test_df["y"].to_numpy(dtype=np.float64)
+    gws = test_df["gw"].to_numpy()
+    masks = compute_tier_masks(test_df["value_ema_3"].to_numpy(dtype=np.float64), p_low, p_high)
+    unique_gws, gw_counts = make_bootstrap_gw_weights(gws, n_boot=n_boot, seed=seed)
+
+    rows = []
+    for m_name in models_to_compare:
+        pred_mse = test_df[f"{m_name}_mse"].to_numpy(dtype=np.float64)
+        pred_fpl = test_df[f"{m_name}_fplloss"].to_numpy(dtype=np.float64)
+
+        sq_mse = (y_true - pred_mse) ** 2
+        sq_fpl = (y_true - pred_fpl) ** 2
+        abs_mse = np.abs(y_true - pred_mse)
+        abs_fpl = np.abs(y_true - pred_fpl)
+
+        for grp_name in ["all", "budget", "mid", "premium"]:
+            grp_mask = masks[grp_name]
+            for metric_name, l_fpl, l_mse in [("MSE", sq_fpl, sq_mse), ("MAE", abs_fpl, abs_mse)]:
+                diff, ci_l, ci_h, n_obs = paired_gw_bootstrap_diff(
+                    loss_a=l_fpl,
+                    loss_b=l_mse,
+                    gws=gws,
+                    mask=grp_mask,
+                    unique_gws=unique_gws,
+                    gw_counts=gw_counts,
+                )
+                rows.append({
+                    "model": m_name,
+                    "grupa": grp_name,
+                    "metryka": metric_name,
+                    "różnica": diff,
+                    "ci_low": ci_l,
+                    "ci_high": ci_h,
+                    "n": n_obs,
+                })
+    return pd.DataFrame(rows)
+
+
+def compute_model_comparison_table(
+    test_df: pd.DataFrame,
+    best_single_col_mse: str,
+    p_low: float,
+    p_high: float,
+    n_boot: int = N_BOOTSTRAP,
+    seed: int = SEED,
+) -> pd.DataFrame:
+    """Compare MSE of every model and meta-model against best_single (variant mse) using paired gw-bootstrap CI."""
+    models_order = ["glm", "xgboost", "mlp", "conv1d", "meta_nnls", "meta_context", "mean_ensemble"]
+    y_true = test_df["y"].to_numpy(dtype=np.float64)
+    gws = test_df["gw"].to_numpy()
+    masks = compute_tier_masks(test_df["value_ema_3"].to_numpy(dtype=np.float64), p_low, p_high)
+    unique_gws, gw_counts = make_bootstrap_gw_weights(gws, n_boot=n_boot, seed=seed)
+
+    pred_ref = test_df[best_single_col_mse].to_numpy(dtype=np.float64)
+    sq_ref = (y_true - pred_ref) ** 2
+
+    rows = []
+    for variant in ["mse", "fplloss"]:
+        for m_name in models_order:
+            pred_m = test_df[f"{m_name}_{variant}"].to_numpy(dtype=np.float64)
+            sq_m = (y_true - pred_m) ** 2
+            for grp_name in ["all", "budget", "mid", "premium"]:
+                grp_mask = masks[grp_name]
+                diff, ci_l, ci_h, n_obs = paired_gw_bootstrap_diff(
+                    loss_a=sq_m,
+                    loss_b=sq_ref,
+                    gws=gws,
+                    mask=grp_mask,
+                    unique_gws=unique_gws,
+                    gw_counts=gw_counts,
+                )
+                rows.append({
+                    "model": m_name,
+                    "wariant": variant,
+                    "grupa": grp_name,
+                    "metryka": "MSE",
+                    "różnica": diff,
+                    "ci_low": ci_l,
+                    "ci_high": ci_h,
+                    "n": n_obs,
+                })
+    return pd.DataFrame(rows)
+
+
+def build_table_tiers(df_metrics_test: pd.DataFrame) -> pd.DataFrame:
+    """Build publication-ready table_tiers.csv rounded to 2 decimal places with clean headers."""
+    models_order = ["glm", "xgboost", "mlp", "conv1d", "meta_nnls", "meta_context", "mean_ensemble"]
+    rows = []
+    for variant, variant_label in [("mse", "MSE"), ("fplloss", "FPLLoss")]:
+        for m_name in models_order:
+            r = df_metrics_test[
+                (df_metrics_test["model"] == m_name) & (df_metrics_test["variant"] == variant)
+            ].iloc[0]
+            rows.append({
+                "Model": m_name,
+                "Wariant": variant_label,
+                "MSE": round(float(r["mse"]), 2),
+                "MSE budget": round(float(r["mse@budget"]), 2),
+                "MSE mid": round(float(r["mse@mid"]), 2),
+                "MSE premium": round(float(r["mse@premium"]), 2),
+                "MAE": round(float(r["mae"]), 2),
+                "MAE budget": round(float(r["mae@budget"]), 2),
+                "MAE mid": round(float(r["mae@mid"]), 2),
+                "MAE premium": round(float(r["mae@premium"]), 2),
+            })
+    return pd.DataFrame(rows)
+
+
 def run_verification_tests() -> None:
-    """Run unit tests verifying weight calculations, fold boundaries, and sample_weight routing."""
+    """Run unit tests verifying weight calculations, fold boundaries, sample_weight routing, and bootstrap."""
     print("=" * 90)
     print("WERYFIKACJA POPRAWNOŚCI (TESTY JEDNOSTKOWE PRZED EKSPERYMENTEM)")
     print("=" * 90)
     set_seed(SEED)
 
-    # 1. Test compute_fpl_weights == FPLLoss on unscaled columns
+    # 1. Test compute_fpl_weights == FPLLoss on unscaled columns using config constants
     toy_df = pd.DataFrame({
         "value_ema_3": [4.0, 4.5, 5.5, 7.0, 11.5],
         "minutes_ema_3": [0.0, 30.0, 60.0, 85.0, 90.0],
     })
     p_low_t, p_high_t = 4.5, 7.0
-    c_t = compute_norm_const(toy_df, minutes_col="minutes_ema_3", eps_min=0.1)
+    c_t = compute_norm_const(toy_df, minutes_col="minutes_ema_3", eps_min=config.EPS_MIN)
     w_np = compute_fpl_weights(
         toy_df,
         p_low=p_low_t,
         p_high=p_high_t,
-        w_mid=1.25,
-        w_premium=2.0,
-        eps_min=0.1,
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
         norm_const=c_t,
     )
     loss_mod = FPLLoss(
@@ -288,9 +487,9 @@ def run_verification_tests() -> None:
         value_idx=0,
         minutes_idx=1,
         model_type="mlp",
-        w_mid=1.25,
-        w_premium=2.0,
-        eps_min=0.1,
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
         norm_const=c_t,
     )
     y_true_t = np.array([1.0, 2.0, 5.0, 8.0, 12.0], dtype=np.float32)
@@ -315,7 +514,6 @@ def run_verification_tests() -> None:
     X_toy = rng.normal(size=(120, 4))
     seasons_toy = np.repeat([2223, 2324, 2425], 40)
     gws_toy = np.tile(np.repeat(np.arange(1, 11), 4), 3)
-    # Regime 1 (low weights) vs Regime 2 (high weights)
     mask_high = X_toy[:, 0] > 0.0
     y_toy = np.where(mask_high, 3.0 * np.maximum(X_toy[:, 0], 0.0) + 1.0, 0.5 * np.maximum(X_toy[:, 1], 0.0) + 0.5)
     w_uniform = np.ones_like(y_toy)
@@ -333,7 +531,6 @@ def run_verification_tests() -> None:
     xgb_w.fit(X_toy, y_toy, sample_weight=w_skewed)
     assert not np.allclose(xgb_u.predict(X_toy), xgb_w.predict(X_toy)), "XGBoost nie uwzględnił sample_weight w fit!"
 
-    # Test fold scoring with sample_weight in ModelSelector
     splits_toy = make_gw_time_series_splits(seasons_toy, gws_toy, n_splits=3)
     sel = ModelSelector(p_low=0.0, p_high=1.0, value_idx=0, random_state=SEED)
     score_unw = sel.score_fold(y_toy[:20], xgb_u.predict(X_toy[:20]), sample_weight=None)
@@ -370,6 +567,20 @@ def run_verification_tests() -> None:
         map_u["glm_test"].predict(X_toy), map_w["glm_test"].predict(X_toy)
     ), "params_search zwróciło identyczny model dla wariantu ważonego i nieważonego!"
     print("[PASS] Test 2: sample_weight trafia zarówno do fit(), jak i do oceny foldu w TimeSeriesSplit CV")
+
+    # 3. Test paired gameweek-cluster bootstrap equivalence
+    ugw, gw_cnt = make_bootstrap_gw_weights(gws_toy, n_boot=50, seed=SEED)
+    diff_pt, ci_l, ci_h, n_sub = paired_gw_bootstrap_diff(
+        loss_a=(y_toy - xgb_w.predict(X_toy)) ** 2,
+        loss_b=(y_toy - xgb_u.predict(X_toy)) ** 2,
+        gws=gws_toy,
+        mask=mask_high,
+        unique_gws=ugw,
+        gw_counts=gw_cnt,
+    )
+    assert n_sub == int(np.sum(mask_high))
+    assert ci_l <= diff_pt <= ci_h
+    print(f"[PASS] Test 3: Sparowany bootstrap blokowy po kolejkach (gw): diff={diff_pt:.4f}, 95% CI=[{ci_l:.4f}, {ci_h:.4f}]")
     print("=" * 90)
 
 
@@ -384,13 +595,11 @@ def build_context_matrix(
     base predictions + pre-match context (position one-hot, price tier one-hot, minutes_ema_3/90)
     + interaction products (prediction * context_var).
     """
-    out = OrderedDict() if False else {}
+    out = {}
 
-    # 1. Base model predictions
     for m_col in model_cols:
         out[f"pred_{m_col}"] = preds_df[m_col].to_numpy(dtype=np.float64)
 
-    # 2. Pre-match context variables
     pos = meta_df["position"].astype(str).to_numpy()
     price = meta_df["value_ema_3"].to_numpy(dtype=np.float64)
     minutes_norm = np.clip(meta_df["minutes_ema_3"].to_numpy(dtype=np.float64) / 90.0, 0.0, 1.0)
@@ -407,7 +616,6 @@ def build_context_matrix(
     for c_name, c_vec in context_vars.items():
         out[c_name] = c_vec
 
-    # 3. Interaction products: prediction * context_var
     for m_col in model_cols:
         p_vec = preds_df[m_col].to_numpy(dtype=np.float64)
         for c_name, c_vec in context_vars.items():
@@ -416,22 +624,13 @@ def build_context_matrix(
     return pd.DataFrame(out, index=preds_df.index)
 
 
-def safe_save_path(path: Path) -> Path:
-    """Return path if it does not exist, otherwise append a timestamp suffix to avoid overwriting old files."""
-    if not path.exists():
-        return path
-    stem, suffix = path.stem, path.suffix
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    return path.with_name(f"{stem}_{ts}{suffix}")
-
-
 def log_results_to_mlflow(
     df_metrics_valid: pd.DataFrame,
     df_metrics_test: pd.DataFrame,
     best_params_log: dict[str, dict] | None = None,
     p_low: float = 4.5,
     p_high: float = 6.925,
-    c_norm: float = 0.316909,
+    c_norm: float = 0.3169,
     artifact_paths: list[Path] | None = None,
 ) -> None:
     """Log all base and meta-model experiment runs, parameters, valid/test metrics, and artifacts to MLflow."""
@@ -467,7 +666,10 @@ def log_results_to_mlflow(
                 "seed": SEED,
                 "p_low": p_low,
                 "p_high": p_high,
-                "norm_const_c": c_norm,
+                "norm_const_c": round(c_norm, 4),
+                "eps_min": config.EPS_MIN,
+                "w_mid": config.W_MID,
+                "w_premium": config.W_PREMIUM,
             }
             if best_params_log and f"{m_name}_{variant}" in best_params_log:
                 for k, v in best_params_log[f"{m_name}_{variant}"].items():
@@ -487,6 +689,26 @@ def log_results_to_mlflow(
                         mlflow.log_artifact(str(ap))
 
     print(f"[MLflow] Zalogowano {len(df_metrics_test)} przebiegów eksperymentalnych do MLflow.")
+
+
+def format_significant_rows(df_comp: pd.DataFrame, has_variant: bool = False) -> list[str]:
+    """Return bullet lines for rows where 95% CI [ci_low, ci_high] does not include 0."""
+    lines = []
+    sig_df = df_comp[(df_comp["ci_low"] > 0.0) | (df_comp["ci_high"] < 0.0)]
+    for _, r in sig_df.iterrows():
+        if has_variant:
+            lines.append(
+                f"- `{r['model']}` (wariant `{r['wariant']}`, grupa `{r['grupa']}`, `{r['metryka']}`, n={int(r['n'])}): "
+                f"różnica = `{r['różnica']:+.4f}`, 95% CI = `[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}]`"
+            )
+        else:
+            lines.append(
+                f"- `{r['model']}` (grupa `{r['grupa']}`, `{r['metryka']}`, n={int(r['n'])}): "
+                f"różnica = `{r['różnica']:+.4f}`, 95% CI = `[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}]`"
+            )
+    if not lines:
+        lines.append("- Brak par, dla których 95% przedział ufności nie obejmuje zera.")
+    return lines
 
 
 def main() -> None:
@@ -530,13 +752,11 @@ def main() -> None:
         f"odrzucone EDA={n_eda_before - len(common_keys)}"
     )
 
-    # Attach unscaled price (value_ema_3 in £m) and minutes (minutes_ema_3 / 90 in [0,1]) to EDA
     fe_aux = df_fe_raw[key_cols + ["value_ema_3", "minutes_ema_3"]].copy()
     fe_aux["_raw_price"] = fe_aux["value_ema_3"].astype(np.float64)
     fe_aux["_raw_min"] = np.clip(fe_aux["minutes_ema_3"].astype(np.float64) / 90.0, 0.0, 1.0)
     df_eda_merged = pd.merge(df_eda_raw, fe_aux[key_cols + ["_raw_price", "_raw_min"]], on=key_cols, how="inner")
 
-    # Sort both datasets globally by (season, gw, code) so TimeSeriesSplit folds never split a gameweek
     df_fe = df_fe_raw.sort_values(["season", "gw", "code"]).reset_index(drop=True)
     df_eda = df_eda_merged.sort_values(["season", "gw", "code"]).reset_index(drop=True)
     assert (df_fe[key_cols].values == df_eda[key_cols].values).all(), "Niezgodność kluczy po sortowaniu (season, gw, code)!"
@@ -561,25 +781,44 @@ def main() -> None:
     price_train_raw = X_train_raw["value_ema_3"].to_numpy(dtype=np.float64)
     p_low = float(np.quantile(price_train_raw, 0.50))
     p_high = float(np.quantile(price_train_raw, 0.955))
-    c_norm = compute_norm_const(X_train_raw, minutes_col="minutes_ema_3", eps_min=0.1)
+    c_norm = compute_norm_const(X_train_raw, minutes_col="minutes_ema_3", eps_min=config.EPS_MIN)
 
     w_train = compute_fpl_weights(
-        X_train_raw, p_low=p_low, p_high=p_high, w_mid=1.25, w_premium=2.0, eps_min=0.1, norm_const=c_norm
+        X_train_raw,
+        p_low=p_low,
+        p_high=p_high,
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
+        norm_const=c_norm,
     )
     w_valid = compute_fpl_weights(
-        X_valid_raw, p_low=p_low, p_high=p_high, w_mid=1.25, w_premium=2.0, eps_min=0.1, norm_const=c_norm
+        X_valid_raw,
+        p_low=p_low,
+        p_high=p_high,
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
+        norm_const=c_norm,
     )
     w_test = compute_fpl_weights(
-        X_test_raw, p_low=p_low, p_high=p_high, w_mid=1.25, w_premium=2.0, eps_min=0.1, norm_const=c_norm
+        X_test_raw,
+        p_low=p_low,
+        p_high=p_high,
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
+        norm_const=c_norm,
     )
 
     print("=" * 90)
-    print(f"PARAMETRY FPLLoss (wyliczone na surowych kolumnach train):")
-    print(f"  p_low (kwantyl 0.50 value_ema_3)  = {p_low:.6f} mln £")
-    print(f"  p_high (kwantyl 0.955 value_ema_3)= {p_high:.6f} mln £")
-    print(f"  Stała normalizująca c (norm_const)= {c_norm:.6f}")
+    print("PARAMETRY FPLLoss (wyliczone na surowych kolumnach train):")
+    print(f"  eps_min = {config.EPS_MIN}, w_mid = {config.W_MID}, w_premium = {config.W_PREMIUM}")
+    print(f"  p_low (kwantyl 0.50 value_ema_3)  = {p_low:.4f} mln £")
+    print(f"  p_high (kwantyl 0.955 value_ema_3)= {p_high:.4f} mln £")
+    print(f"  Stała normalizująca c (norm_const)= {c_norm:.4f}")
     print(
-        f"  Wagi w_train: mean={w_train.mean():.6f}, min={w_train.min():.6f}, max={w_train.max():.6f}"
+        f"  Wagi w_train: mean={w_train.mean():.4f}, min={w_train.min():.4f}, max={w_train.max():.4f}"
     )
     print("=" * 90)
 
@@ -690,7 +929,6 @@ def main() -> None:
             preds_test_dict[f"{m_name}_{variant}"] = p_tst
 
     # 8. Neural Networks (MLP, Conv1D): chronological internal early-stopping split from train
-    # Last 8 gameweeks of 2024/25 (season == 2425, gw >= 31) used as internal early-stopping validation set
     print("\n" + "=" * 90)
     print("PRZYGOTOWANIE DANYCH I PODZIAŁU EARLY-STOPPING DLA SIECI NEURONOWYCH (MLP, CONV1D)")
     print("=" * 90)
@@ -702,13 +940,11 @@ def main() -> None:
         f"early_stopping_val (24/25, gw 31-38)={int(es_mask_fe.sum())} wierszy"
     )
 
-    # Target scaler fitted strictly on train
     splits_fe_scaled, target_scaler_fe = scale_target(splits_fe)
     y_train_scaled = splits_fe_scaled["y_train"].reset_index(drop=True)
     y_valid_scaled = splits_fe_scaled["y_valid"].reset_index(drop=True)
     y_test_scaled = splits_fe_scaled["y_test"].reset_index(drop=True)
 
-    # Auxiliary unscaled [value_ema_3, minutes_ema_3 / 90] tensors for MLP
     def make_aux_tensor(df_part: pd.DataFrame) -> torch.Tensor:
         p_col = df_part["value_ema_3"].to_numpy(dtype=np.float32)
         m_col = np.clip(df_part["minutes_ema_3"].to_numpy(dtype=np.float32) / 90.0, 0.0, 1.0)
@@ -744,7 +980,6 @@ def main() -> None:
         TensorDataset(X_tst_t, y_tst_t, aux_tst_t), batch_size=batch_size_nn, shuffle=False
     )
 
-    # Prepare sequential data for Conv1D from eda.parquet
     seq_feature_cols = [
         c
         for c in cols_map.fpl_cols + cols_map.match_context_cols + cols_map.market_cols + cols_map.betting_cols
@@ -766,7 +1001,6 @@ def main() -> None:
     eda_valid_df = merge_eda_xy(splits_eda_scaled["X_valid"], splits_eda_scaled["y_valid"])
     eda_test_df = merge_eda_xy(splits_eda_scaled["X_test"], splits_eda_scaled["y_test"])
 
-    # Fit StandardScaler on sequential features strictly on train
     seq_scaler = StandardScaler()
     eda_train_df[seq_feature_cols] = seq_scaler.fit_transform(eda_train_df[seq_feature_cols])
     eda_valid_df[seq_feature_cols] = seq_scaler.transform(eda_valid_df[seq_feature_cols])
@@ -856,9 +1090,9 @@ def main() -> None:
                     value_idx=0,
                     minutes_idx=1,
                     model_type="mlp",
-                    w_mid=1.25,
-                    w_premium=2.0,
-                    eps_min=0.1,
+                    w_mid=config.W_MID,
+                    w_premium=config.W_PREMIUM,
+                    eps_min=config.EPS_MIN,
                     norm_const=c_norm,
                 )
                 monitor_metric = "loss"
@@ -967,10 +1201,11 @@ def main() -> None:
     price_val_common = valid_base_df["value_ema_3"].to_numpy(dtype=np.float64)
     price_tst_common = test_base_df["value_ema_3"].to_numpy(dtype=np.float64)
 
+    best_single_cols_by_variant: dict[str, str] = {}
+
     for variant in ["mse", "fplloss"]:
         variant_cols = [f"{m}_{variant}" for m in base_models_order]
 
-        # Evaluate 4 base models
         best_val_criterion = float("inf")
         best_single_model_name = None
         best_single_col = None
@@ -1007,12 +1242,12 @@ def main() -> None:
                 best_single_model_name = m_name
                 best_single_col = col
 
+        best_single_cols_by_variant[variant] = best_single_col
         print(
             f"\n[Wariant {variant.upper()}] Najlepszy pojedynczy model na valid: "
             f"{best_single_model_name.upper()} ({'MSE' if variant == 'mse' else 'FPLLoss'}={best_val_criterion:.4f})"
         )
 
-        # Prepare matrices of 4 base predictions on valid and test
         X_meta_val = valid_base_df[variant_cols].copy()
         X_meta_val.columns = base_models_order
         X_meta_tst = test_base_df[variant_cols].copy()
@@ -1120,7 +1355,7 @@ def main() -> None:
             metrics_valid_rows.append({"model": m_label, "variant": variant, "level": "meta", **mv})
             metrics_test_rows.append({"model": m_label, "variant": variant, "level": "meta", **mt})
 
-    # 12. Save all artifacts in results/ (without overwriting existing files)
+    # 12. Tier counts, Bootstrap comparisons, and Publication-ready tables
     results_dir = config.RESULTS_DIR
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1128,61 +1363,119 @@ def main() -> None:
     df_metrics_test = pd.DataFrame(metrics_test_rows)
     df_meta_weights = pd.DataFrame(meta_weights_rows)
 
-    path_metrics_test = safe_save_path(results_dir / "metrics_test.csv")
-    path_metrics_valid = safe_save_path(results_dir / "metrics_valid.csv")
-    path_preds_valid = safe_save_path(results_dir / "preds_valid.parquet")
-    path_preds_test = safe_save_path(results_dir / "preds_test.parquet")
-    path_meta_weights = safe_save_path(results_dir / "meta_weights.csv")
-    path_readme = safe_save_path(results_dir / "README.md")
+    df_tier_counts = compute_tier_counts_table(
+        splits_dict={"train": X_train_raw, "valid": valid_base_df, "test": test_base_df},
+        p_low=p_low,
+        p_high=p_high,
+    )
+    df_variant_comp = compute_variant_comparison_table(
+        test_df=test_base_df,
+        p_low=p_low,
+        p_high=p_high,
+        n_boot=N_BOOTSTRAP,
+        seed=SEED,
+    )
+    df_model_comp = compute_model_comparison_table(
+        test_df=test_base_df,
+        best_single_col_mse=best_single_cols_by_variant["mse"],
+        p_low=p_low,
+        p_high=p_high,
+        n_boot=N_BOOTSTRAP,
+        seed=SEED,
+    )
+    df_table_tiers = build_table_tiers(df_metrics_test)
+
+    path_metrics_test = results_dir / "metrics_test.csv"
+    path_metrics_valid = results_dir / "metrics_valid.csv"
+    path_preds_valid = results_dir / "preds_valid.parquet"
+    path_preds_test = results_dir / "preds_test.parquet"
+    path_meta_weights = results_dir / "meta_weights.csv"
+    path_tier_counts = results_dir / "tier_counts.csv"
+    path_variant_comp = results_dir / "variant_comparison.csv"
+    path_model_comp = results_dir / "model_comparison.csv"
+    path_table_tiers = results_dir / "table_tiers.csv"
+    path_readme = results_dir / "README.md"
 
     df_metrics_test.to_csv(path_metrics_test, index=False)
     df_metrics_valid.to_csv(path_metrics_valid, index=False)
     valid_base_df.to_parquet(path_preds_valid, index=False)
     test_base_df.to_parquet(path_preds_test, index=False)
     df_meta_weights.to_csv(path_meta_weights, index=False)
+    df_tier_counts.to_csv(path_tier_counts, index=False)
+    df_variant_comp.to_csv(path_variant_comp, index=False)
+    df_model_comp.to_csv(path_model_comp, index=False)
+    df_table_tiers.to_csv(path_table_tiers, index=False, float_format="%.2f")
+
+    sig_variant_lines = format_significant_rows(df_variant_comp, has_variant=False)
+    sig_model_lines = format_significant_rows(df_model_comp, has_variant=True)
+
+    tc_train = df_tier_counts[df_tier_counts["split"] == "train"].iloc[0]
+    tc_valid = df_tier_counts[df_tier_counts["split"] == "valid"].iloc[0]
+    tc_test = df_tier_counts[df_tier_counts["split"] == "test"].iloc[0]
+    n_test_gws = int(test_base_df["gw"].nunique())
 
     readme_content = f"""# Eksperymenty Predykcji Punktów FPL — Modele Bazowe, FPLLoss i Meta-Modele
 
 ## 1. Uruchomienie eksperymentu
-Cały potok eksperymentalny (weryfikacja testami jednostkowymi, przygotowanie danych, strojenie GLM i XGBoost, trening sieci MLP i Conv1D, konstrukcja meta-modeli oraz ewaluacja na zbiorze testowym) uruchamiany jest jednym poleceniem z katalogu głównego repozytorium:
+Cały potok eksperymentalny uruchamiany jest jednym poleceniem z katalogu głównego repozytorium:
 
 ```bash
 PYTHONPATH=src python -m fpl_project.models.run_experiments
 ```
 
-Ziarno losowe zostało ustalone na `SEED = {SEED}` (`random.seed`, `np.random.seed`, `torch.manual_seed`, `torch.cuda.manual_seed_all`, `torch.backends.cudnn.deterministic = True`, `torch.backends.cudnn.benchmark = False`), co gwarantuje pełną powtarzalność wyników.
+Ziarno losowe zostało ustalone na `SEED = {SEED}` (`random.seed`, `np.random.seed`, `torch.manual_seed`, `torch.cuda.manual_seed_all`, `torch.backends.cudnn.deterministic = True`, `torch.backends.cudnn.benchmark = False`).
 
-## 2. Podział danych i brak wycieku informacji
+## 2. Podział danych i liczebności grup cenowych (`tier_counts.csv`)
 - **Train (`2022/23`, `2023/24`, `2024/25`)**: `{len(X_train_raw)}` obserwacji (posortowanych globalnie po `(season, gw, code)`).
-  - Dla sieci neuronowych (`MLP`, `Conv1D`) wydzielono wewnętrzny chronologiczny zbiór wczesnego zatrzymania (`early_stopping_val`): ostatnie 8 kolejek sezonu `2024/25` (`gw >= 31`, `{int(es_mask_fe.sum())}` obserwacji), a trening właściwy przebiegał na wcześniejszych kolejkach (`{int(sub_mask_fe.sum())}` obserwacji). Zbiór `valid` nie był używany do wczesnego zatrzymania ani doboru hiperparametrów.
-- **Valid (`2025/26`)**: `{len(valid_base_df)}` obserwacji — użyty wyłącznie do wygenerowania predykcji modeli bazowych uczących meta-modele oraz wyboru najlepszego pojedynczego modelu odniesienia.
-- **Test (`2026/27`, rozegrane kolejki `is_played == True`)**: `{len(test_base_df)}` obserwacji — użyty wyłącznie do końcowej oceny wszystkich modeli.
-- **Złączenie wewnętrzne (`inner join` po `(code, season, gw)`)**:
-  - Liczba wierszy odrzuconych przy łączeniu `features_engineering.parquet` z `eda.parquet` i predykcjami `Conv1D`: `0` na `valid` oraz `0` na `test` (w `train_sub` dla `Conv1D` pominięto `{len(eda_train_sub_df) - len(conv_train_sub_ds)}` początkowych wierszy rozgrzewki okna `seq_len = {seq_len}`).
+  - Wewnętrzny chronologiczny zbiór wczesnego zatrzymania dla sieci (`MLP`, `Conv1D`): ostatnie 8 kolejek sezonu `2024/25` (`gw >= 31`, `{int(es_mask_fe.sum())}` obserwacji); trening właściwy sieci na wcześniejszych kolejkach (`{int(sub_mask_fe.sum())}` obserwacji).
+- **Valid (`2025/26`)**: `{len(valid_base_df)}` obserwacji.
+- **Test (`2026/27`, `is_played == True`)**: `{len(test_base_df)}` obserwacji (`{n_test_gws}` kolejek).
+- **Złączenie wewnętrzne (`inner join` po `(code, season, gw)`)**: `0` odrzuconych wierszy na `valid` oraz `0` na `test` (w `train_sub` dla `Conv1D` pominięto `{len(eda_train_sub_df) - len(conv_train_sub_ds)}` początkowych wierszy rozgrzewki okna `seq_len = {seq_len}`).
 
-## 3. Funkcja straty `FPLLoss` i wartość stałej normalizującej $c$
-Wagi obserwacji wyliczane są z **nieskalowanych** kolumn wiersza:
-- Cena: `price = value_ema_3` (w mln funtów),
-- Minuty: `m = clip(minutes_ema_3 / 90.0, 0.0, 1.0)`.
+Progi cenowe na zbiorze `train`: $p_{{\\text{{low}}}} = {p_low:.4f}$ mln £ (kwantyl `0.50`), $p_{{\\text{{high}}}} = {p_high:.4f}$ mln £ (kwantyl `0.955`).
 
-Na zbiorze treningowym (`train`) wyznaczono:
-- Kwantyl `0.50` ceny ($p_{{\\text{{low}}}}$): **`{p_low:.6f}` mln £**
-- Kwantyl `0.955` ceny ($p_{{\\text{{high}}}}$): **`{p_high:.6f}` mln £**
-- Stała normalizująca $c$ (`norm_const` $= \\text{{mean}}(\\ln(1 + \\max(m_i, 0)) + \\varepsilon_{{\\min}})$ przy $\\varepsilon_{{\\min}} = 0.1$): **`{c_norm:.6f}`**
+| Zbiór (`split`) | `budget` ($< {p_low:.2f}$) | `mid` ($[{p_low:.2f}, {p_high:.3f})$) | `premium` ($\\ge {p_high:.3f}$) | Razem (`total`) |
+| :--- | ---: | ---: | ---: | ---: |
+| `train` | {int(tc_train['budget'])} | {int(tc_train['mid'])} | {int(tc_train['premium'])} | {int(tc_train['total'])} |
+| `valid` | {int(tc_valid['budget'])} | {int(tc_valid['mid'])} | {int(tc_valid['premium'])} | {int(tc_valid['total'])} |
+| `test` | {int(tc_test['budget'])} | {int(tc_test['mid'])} | {int(tc_test['premium'])} | {int(tc_test['total'])} |
 
-Waga pojedynczej obserwacji:
-$$w_i = \\frac{{w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + \\max(m_i, 0)) + 0.1)}}{{{c_norm:.6f}}}, \\quad w_{{\\text{{cena}}, i}} \\in \\{{1.0, 1.25, 2.0\\}}$$
+## 3. Funkcja straty `FPLLoss` i stałe konfiguracyjne
+Stałe funkcji straty zdefiniowane w `src/fpl_project/scripts/config.py`:
+- `EPS_MIN` ($\\varepsilon_{{\\min}}$) = `{config.EPS_MIN}`
+- `W_MID` ($w_{{\\text{{mid}}}}$) = `{config.W_MID}`
+- `W_PREMIUM` ($w_{{\\text{{premium}}}}$) = `{config.W_PREMIUM}`
+- Stała normalizująca $c$ (`norm_const` $= \\text{{mean}}(\\ln(1 + m_i) + \\varepsilon_{{\\min}})$ na `train`, gdzie $m_i = \\text{{clip}}(\\text{{minutes\\_ema\\_3}} / 90, 0, 1)$): **`{c_norm:.4f}`**
+
+Wzór wagi obserwacji:
+$$w_i = \\frac{{w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + m_i) + \\varepsilon_{{\\min}})}}{{c}}, \\quad w_{{\\text{{cena}}, i}} \\in \\{{1.0, {config.W_MID}, {config.W_PREMIUM}\\}}, \\quad c = {c_norm:.4f}$$
 
 ## 4. Realizacja wariantu (B) dla GLM i XGBoost
-- **XGBoost (`objective="reg:squarederror"`)**: przekazanie `sample_weight = w_i` do `fit()` minimalizuje dokładnie ważony błąd średniokwadratowy $\\sum_i w_i (y_i - \\hat{{y}}_i)^2$, czyli dokładnie tę samą funkcję celu co `FPLLoss`.
-- **GLM (`glum.GeneralizedLinearRegressor`)**: przekazanie `sample_weight = w_i` maksymalizuje **ważoną log-wiarygodność** (weighted log-likelihood / ważoną dewiancję wybranej rodziny rozkładu: Poisson, Negative Binomial z estymowanym/strojonym $\\theta$ lub Tweedie z mocą $p \\in [1.1, 1.9]$). Dla uogólnionych modeli liniowych z funkcją wiążącą `log` i niegaussowską funkcją wariancji jest to **analog** `FPLLoss` (ważenie obserwacji tymi samymi wagami decyzyjnymi $w_i$), a nie algebraicznie identyczna ważona strata kwadratowa MSE.
-- W `TimeSeriesSplit` CV (z granicami foldów wypadającymi ściśle pomiędzy kolejkami `(season, gw)`) wagi `w_i` przekazywane są zarówno do `estimator.fit()`, jak i do ważonego kryterium oceny foldu (`neg_weighted_mse`).
+- **XGBoost (`objective="reg:squarederror"`)**: przekazanie `sample_weight = w_i` do `fit()` minimalizuje ważony błąd średniokwadratowy $\\sum_i w_i (y_i - \\hat{{y}}_i)^2$.
+- **GLM (`glum.GeneralizedLinearRegressor`)**: przekazanie `sample_weight = w_i` maksymalizuje ważoną log-wiarygodność wybranej rodziny rozkładu (Poisson, Negative Binomial ze strojonym $\\theta$, Tweedie z mocą $p \\in [1.1, 1.9]$) — analog `FPLLoss`.
+- W `TimeSeriesSplit` CV (granice foldów pomiędzy kolejkami `(season, gw)`) wagi `w_i` przekazywane są do `estimator.fit()` oraz do ważonego kryterium oceny foldu (`neg_weighted_mse`).
 
-## 5. Wygenerowane pliki w katalogu `results/`
-- `metrics_test.csv` — pełne zestawienie metryk na zbiorze testowym (`2026/27`) wraz z liczbą cech wejściowych `p` użytych w $\\text{{Adj }} R^2$,
-- `metrics_valid.csv` — zestawienie metryk na zbiorze walidacyjnym (`2025/26`),
-- `preds_valid.parquet`, `preds_test.parquet` — identyfikatory zawodników, `y` oraz predykcje wszystkich modeli bazowych i meta-modeli,
-- `meta_weights.csv` — wagi i wyrazy wolne (`intercept`) wyuczonych meta-modeli (`meta_nnls` oraz `meta_context`).
+## 5. Metodologia bootstrapu sparowanego i przedziały ufności (95% CI)
+- **Procedura**: bootstrap sparowany blokowy na poziomie całych kolejek (`gw`) zbioru testowego (`{n_test_gws}` kolejek, `n = {len(test_base_df)}` obserwacji).
+- **Parametry**: `2000` powtórzeń losowania ze zwracaniem całych kolejek (`gw`), ziarno generatora `SEED = {SEED}`, identyczna próba bootstrapowa dla porównywanych wariantów i modeli.
+- **Przedział ufności**: metoda percentylowa (`2.5%` i `97.5%` rozkładu bootstrapowego różnicy).
+
+### 5.1. Porównanie wariantów `FPLLoss − MSE` (`variant_comparison.csv`)
+Przypadki (model, grupa, metryka), w których 95% przedział ufności dla różnicy $\\text{{Metryka}}(\\text{{fplloss}}) - \\text{{Metryka}}(\\text{{mse}})$ **nie obejmuje zera**:
+{chr(10).join(sig_variant_lines)}
+
+### 5.2. Porównanie modeli z `best_single` w wariancie `mse` (`model_comparison.csv`)
+Przypadki (model, wariant, grupa), w których 95% przedział ufności dla różnicy $\\text{{MSE}}(\\text{{model}}) - \\text{{MSE}}(\\text{{best\\_single\\_mse}})$ **nie obejmuje zera**:
+{chr(10).join(sig_model_lines)}
+
+## 6. Pliki wynikowe w katalogu `results/`
+- `metrics_test.csv`, `metrics_valid.csv` — metryki na zbiorze testowym i walidacyjnym,
+- `tier_counts.csv` — liczebności grup `budget`, `mid`, `premium` dla `train`, `valid`, `test`,
+- `variant_comparison.csv` — różnice `FPLLoss − MSE` dla MSE i MAE z 95% CI z bootstrapu sparowanego,
+- `model_comparison.csv` — różnice MSE względem `best_single` (wariant `mse`) z 95% CI z bootstrapu sparowanego,
+- `table_tiers.csv` — tabela MSE i MAE w podziale na grupy cenowe (zaokrąglona do 2 miejsc po przecinku),
+- `meta_weights.csv` — wagi i wyrazy wolne wyuczonych meta-modeli,
+- `preds_valid.parquet`, `preds_test.parquet` — predykcje wszystkich modeli na zbiorze walidacyjnym i testowym.
 """
     path_readme.write_text(readme_content, encoding="utf-8")
 
@@ -1193,9 +1486,24 @@ $$w_i = \\frac{{w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + \\max(m_i, 0)) + 0.1)}}
         p_low=p_low,
         p_high=p_high,
         c_norm=c_norm,
-        artifact_paths=[path_metrics_test, path_metrics_valid, path_meta_weights, path_readme],
+        artifact_paths=[
+            path_metrics_test,
+            path_metrics_valid,
+            path_meta_weights,
+            path_tier_counts,
+            path_variant_comp,
+            path_model_comp,
+            path_table_tiers,
+            path_readme,
+        ],
     )
 
+    print("\n" + "=" * 115)
+    print(f"LICZEBNOŚCI GRUP CENOWYCH ({path_tier_counts.name}):")
+    print(df_tier_counts.to_string(index=False))
+    print("\n" + "=" * 115)
+    print(f"TABELA GOTOWA DO PRACY ({path_table_tiers.name}):")
+    print(df_table_tiers.to_string(index=False))
     print("\n" + "=" * 115)
     print(f"TABELA WYNIKÓW NA ZBIORZE TESTOWYM ({path_metrics_test.name}):")
     print("=" * 115)
