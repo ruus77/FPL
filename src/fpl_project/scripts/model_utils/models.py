@@ -1,6 +1,53 @@
 from abc import ABC, abstractclassmethod
+import numpy as np
+import pandas as pd
 from torch import nn
 import torch
+
+
+def compute_norm_const(
+    df_or_minutes: pd.DataFrame | pd.Series | np.ndarray,
+    minutes_col: str = "minutes_ema_3",
+    eps_min: float = 0.1,
+) -> float:
+    """Compute normalization constant c = mean(ln(1 + max(m_i, 0)) + eps_min) on train.
+
+    Here m_i = minutes_ema_3 / 90.0 in [0, 1] from the unscaled column.
+    """
+    if isinstance(df_or_minutes, pd.DataFrame):
+        raw_min = df_or_minutes[minutes_col].to_numpy(dtype=np.float64) / 90.0
+    elif isinstance(df_or_minutes, pd.Series):
+        raw_min = df_or_minutes.to_numpy(dtype=np.float64) / 90.0
+    else:
+        raw_min = np.asarray(df_or_minutes, dtype=np.float64)
+    m_clipped = np.clip(raw_min, 0.0, 1.0)
+    return float(np.mean(np.log1p(np.maximum(m_clipped, 0.0)) + eps_min))
+
+
+def compute_fpl_weights(
+    df: pd.DataFrame,
+    p_low: float,
+    p_high: float,
+    price_col: str = "value_ema_3",
+    minutes_col: str = "minutes_ema_3",
+    w_mid: float = 1.25,
+    w_premium: float = 2.0,
+    eps_min: float = 0.1,
+    norm_const: float = 1.0,
+) -> np.ndarray:
+    """Compute FPLLoss sample weights from unscaled columns:
+    price = value_ema_3 (in £m), minutes = minutes_ema_3 / 90.0 (in [0, 1]).
+    """
+    price = df[price_col].to_numpy(dtype=np.float64)
+    minutes = np.clip(df[minutes_col].to_numpy(dtype=np.float64) / 90.0, 0.0, 1.0)
+
+    w_price = np.ones_like(price, dtype=np.float64)
+    w_price = np.where(price >= p_low, w_mid, w_price)
+    w_price = np.where(price >= p_high, w_premium, w_price)
+
+    w_min = np.log1p(np.maximum(minutes, 0.0)) + eps_min
+    weights = (w_price * w_min) / norm_const
+    return weights.astype(np.float64)
 
 
 class MLP(nn.Module):
@@ -137,7 +184,7 @@ class FPLLoss(nn.Module):
     r"""Weighted MSE loss for FPL.
 
     L = mean( w_i * (y_i - yhat_i)^2 ),
-    w_i = w_price(price_i) * (ln(1 + m_i) + eps_min)
+    w_i = w_price(price_i) * (ln(1 + m_i) + eps_min) / norm_const
 
     where w_price = 1          for price <  p_low,
                     w_mid      for p_low <= price < p_high,
@@ -146,10 +193,11 @@ class FPLLoss(nn.Module):
     price and m are standardized price and minutes from MLP features or from the last step
     of the window (lstm/conv1d); with use_ema_minutes=True, m is EMA3 of minutes from the last 3
     steps of the window (sequences only). Weights are divided by the constant `norm_const`
-    (default 1.0 = no normalization).
+    (default 1.0 = no normalization). Also supports passing precomputed 1D sample weights `x`
+    or `weights` directly so all models use identical unscaled weights from `compute_fpl_weights`.
     """
 
-    def __init__(self, p_low: float, p_high: float, value_idx: int, minutes_idx: int,
+    def __init__(self, p_low: float, p_high: float, value_idx: int = 0, minutes_idx: int = 1,
                  model_type: str = "mlp",
                  w_mid: float = 1.25,
                  w_premium: float = 2.0,
@@ -172,7 +220,7 @@ class FPLLoss(nn.Module):
         self.use_ema_minutes = use_ema_minutes
 
     def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
-        if self.model_type == "mlp":
+        if self.model_type == "mlp" or x.ndim == 2:
             return x[:, idx]
         elif self.model_type in ["lstm", "conv1d"]:
             return x[:, -1, idx]
@@ -180,7 +228,7 @@ class FPLLoss(nn.Module):
             raise ValueError(f"Nieznany model_type: {self.model_type}")
 
     def _get_minutes(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_ema_minutes and self.model_type in ("lstm", "conv1d"):
+        if self.use_ema_minutes and self.model_type in ("lstm", "conv1d") and x.ndim == 3:
             seq = x[:, -3:, self.minutes_idx]
             alpha = 0.5  # EMA3: span=3
             m = seq[:, 0]
@@ -189,9 +237,23 @@ class FPLLoss(nn.Module):
             return m
         return self._get_feature(x, self.minutes_idx)
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        y_pred: torch.Tensor,
+        y_true: torch.Tensor,
+        x: torch.Tensor | None = None,
+        weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         y_pred = y_pred.flatten()
         y_true = y_true.flatten()
+
+        if weights is not None:
+            w = weights.flatten().to(y_pred.device, dtype=y_pred.dtype).detach()
+            return (w * (y_true - y_pred) ** 2).mean()
+
+        if x is not None and x.ndim == 1:
+            w = x.flatten().to(y_pred.device, dtype=y_pred.dtype).detach()
+            return (w * (y_true - y_pred) ** 2).mean()
 
         price = self._get_feature(x, self.value_idx)
         minutes = self._get_minutes(x)
@@ -201,6 +263,6 @@ class FPLLoss(nn.Module):
         w_price = torch.where(price >= self.p_high, torch.full_like(price, self.w_premium), w_price)
 
         w_min = torch.log1p(minutes.clamp(min=0.0)) + self.eps_min
-        weights = (w_price * w_min / self.norm_const).detach()
+        w = (w_price * w_min / self.norm_const).detach()
 
-        return (weights * (y_true - y_pred) ** 2).mean()
+        return (w * (y_true - y_pred) ** 2).mean()

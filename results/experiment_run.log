@@ -1,0 +1,188 @@
+Command exited with code 0.
+
+Command output:
+==========================================================================================
+WERYFIKACJA POPRAWNOŚCI (TESTY JEDNOSTKOWE PRZED EKSPERYMENTEM)
+==========================================================================================
+[PASS] Test 1: compute_fpl_weights == FPLLoss (loss=5.171257)
+Fitting 3 folds for each of 4 candidates, totalling 12 fits (glm_test, scoring=neg_mean_squared_error)
+Fitting 3 folds for each of 4 candidates, totalling 12 fits (glm_test, scoring=neg_weighted_mse)
+[PASS] Test 2: sample_weight trafia zarówno do fit(), jak i do oceny foldu w TimeSeriesSplit CV
+==========================================================================================
+Urządzenie obliczeniowe: cpu | Ziarno losowe (SEED): 77
+[Wspólny zbiór wierszy FE ∩ EDA po ['code', 'season', 'gw']] FE przed=114540, EDA przed=114540, po inner join=114540, odrzucone FE=0, odrzucone EDA=0
+Rozmiary podziału: train=80618 (sezony 22/23-24/25), valid=29338 (sezon 25/26), test=4258 (rozegrane 26/27)
+==========================================================================================
+PARAMETRY FPLLoss (wyliczone na surowych kolumnach train):
+  p_low (kwantyl 0.50 value_ema_3)  = 4.500000 mln £
+  p_high (kwantyl 0.955 value_ema_3)= 6.925000 mln £
+  Stała normalizująca c (norm_const)= 0.316909
+  Wagi w_train: mean=1.245478, min=0.315548, max=5.005517
+==========================================================================================
+Liczba cech wejściowych modeli tabelarycznych (GLM, XGBoost, MLP): p = 219
+  Fold 1: train= 14837 (do (2223, 24)) | val= 12761 (od (2223, 25) do (2324, 4))
+  Fold 2: train= 27598 (do (2324, 4)) | val= 13350 (od (2324, 5) do (2324, 22))
+  Fold 3: train= 40948 (do (2324, 22)) | val= 13994 (od (2324, 23) do (2425, 2))
+  Fold 4: train= 54942 (do (2425, 2)) | val= 12211 (od (2425, 3) do (2425, 20))
+  Fold 5: train= 67153 (do (2425, 20)) | val= 13465 (od (2425, 21) do (2425, 38))
+Oszacowane metodą momentów theta (Negative Binomial) na train: theta_mom = 3.2622
+
+==========================================================================================
+STROJENIE I TRENING MODELI TABELARYCZNYCH (GLM, XGBOOST) — WARIANT: MSE
+==========================================================================================
+Fitting 5 folds for each of 20 candidates, totalling 100 fits (glm, scoring=neg_mean_squared_error)
+Fitting 5 folds for each of 20 candidates, totalling 100 fits (xgboost, scoring=neg_mean_squared_error)
+  [GLM - mse] Najlepsze parametry: {'alpha': np.float64(0.0664337822434044), 'family': 'negative.binomial(0.1735)', 'l1_ratio': np.float64(0.8601890314542726), 'link': 'auto'}
+  [XGBOOST - mse] Najlepsze parametry: {'colsample_bytree': np.float64(0.6071037471681247), 'gamma': np.float64(0.05264248693855833), 'learning_rate': np.float64(0.01796943505088078), 'max_depth': 6, 'min_child_weight': 9, 'n_estimators': 192, 'reg_alpha': np.float64(1.73524435554979), 'reg_lambda': np.float64(2.415566542513418), 'subsample': np.float64(0.7995676905948842)}
+
+==========================================================================================
+STROJENIE I TRENING MODELI TABELARYCZNYCH (GLM, XGBOOST) — WARIANT: FPLLOSS
+==========================================================================================
+Fitting 5 folds for each of 20 candidates, totalling 100 fits (glm, scoring=neg_weighted_mse)
+Fitting 5 folds for each of 20 candidates, totalling 100 fits (xgboost, scoring=neg_weighted_mse)
+  [GLM - fplloss] Najlepsze parametry: {'alpha': np.float64(0.0664337822434044), 'family': 'negative.binomial(0.1735)', 'l1_ratio': np.float64(0.8601890314542726), 'link': 'auto'}
+  [XGBOOST - fplloss] Najlepsze parametry: {'colsample_bytree': np.float64(0.6290017382498527), 'gamma': np.float64(4.856696250276232), 'learning_rate': np.float64(0.01752202990693996), 'max_depth': 3, 'min_child_weight': 2, 'n_estimators': 220, 'reg_alpha': np.float64(1.146086131071906), 'reg_lambda': np.float64(2.736132122446615), 'subsample': np.float64(0.8802281435548132)}
+
+==========================================================================================
+PRZYGOTOWANIE DANYCH I PODZIAŁU EARLY-STOPPING DLA SIECI NEURONOWYCH (MLP, CONV1D)
+==========================================================================================
+Wewnętrzny podział train dla sieci: train_sub=74533 wierszy, early_stopping_val (24/25, gw 31-38)=6085 wierszy
+Liczba kanałów wejściowych dla Conv1D (z eda.parquet): p = 39, seq_len = 8
+[Conv1D SequenceDataset] train_sub=55502 (pominięto 19031 wierszy rozgrzewki okna seq_len=8), es_val=6085, valid=29338, test=4258
+
+==========================================================================================
+TRENING SIECI NEURONOWEJ: MLP — WARIANT: MSE (seed=77)
+==========================================================================================
+  [MLP - mse] Zatrzymano po 19 epokach | ES_val MSE=3.3077, Loss=3.3077, AdjR2=0.2929
+
+==========================================================================================
+TRENING SIECI NEURONOWEJ: MLP — WARIANT: FPLLOSS (seed=77)
+==========================================================================================
+  [MLP - fplloss] Zatrzymano po 14 epokach | ES_val MSE=3.3269, Loss=7.7320, AdjR2=0.2888
+
+==========================================================================================
+TRENING SIECI NEURONOWEJ: CONV1D — WARIANT: MSE (seed=77)
+==========================================================================================
+  [CONV1D - mse] Zatrzymano po 11 epokach | ES_val MSE=3.7567, Loss=3.7567, AdjR2=0.2209
+
+==========================================================================================
+TRENING SIECI NEURONOWEJ: CONV1D — WARIANT: FPLLOSS (seed=77)
+==========================================================================================
+  [CONV1D - fplloss] Zatrzymano po 11 epokach | ES_val MSE=3.6730, Loss=8.7959, AdjR2=0.2382
+
+==========================================================================================
+ŁĄCZENIE PREDYKCJI WSZYSTKICH MODELI PO (code, season, gw) — INNER JOIN
+==========================================================================================
+Valid po inner join wszystkich 4 modeli: 29338 wierszy (wypadło: 0 wierszy)
+Test po inner join wszystkich 4 modeli:  4258 wierszy (wypadło: 0 wierszy)
+
+==========================================================================================
+UCZENIE META-MODELI NA VALID (2025/26) I EWALUACJA NA TEST (2026/27)
+==========================================================================================
+
+[Wariant MSE] Najlepszy pojedynczy model na valid: XGBOOST (MSE=3.6931)
+  Wagi meta_nnls (mse): intercept=-0.083628
+    glm       : 0.172170
+    xgboost   : 0.666612
+    mlp       : 0.177411
+    conv1d    : 0.225933
+  Wagi meta_context (mse, p=44): intercept=-0.108560
+    pred_glm                            : 0.029725
+    pred_xgboost                        : 0.374545
+    pred_mlp                            : 0.159592
+    pred_conv1d                         : 0.136786
+    pos_DEF                             : 0.034265
+    pos_FWD                             : 0.011359
+    tier_budget                         : 0.000453
+    tier_mid                            : 0.036148
+    tier_premium                        : 0.029557
+    minutes_ema_3_norm                  : 0.030226
+    pred_glm__x__pos_GK                 : 0.030101
+    pred_glm__x__pos_MID                : 0.029446
+    pred_glm__x__tier_mid               : 0.041043
+    pred_glm__x__tier_premium           : 0.074900
+    pred_glm__x__minutes_ema_3_norm     : 0.022149
+    pred_xgboost__x__pos_GK             : 0.079224
+    pred_xgboost__x__pos_DEF            : 0.182682
+    pred_xgboost__x__pos_MID            : 0.041958
+    pred_xgboost__x__pos_FWD            : 0.070682
+    pred_xgboost__x__tier_budget        : 0.087604
+    pred_xgboost__x__tier_mid           : 0.194158
+    pred_xgboost__x__tier_premium       : 0.092783
+    pred_xgboost__x__minutes_ema_3_norm : 0.057382
+    pred_mlp__x__pos_GK                 : 0.045969
+    pred_mlp__x__pos_DEF                : 0.095937
+    pred_mlp__x__pos_MID                : 0.013358
+    pred_mlp__x__pos_FWD                : 0.004329
+    pred_mlp__x__tier_budget            : 0.070078
+    pred_mlp__x__tier_mid               : 0.026818
+    pred_mlp__x__tier_premium           : 0.062697
+    pred_conv1d__x__pos_GK              : 0.021692
+    pred_conv1d__x__pos_MID             : 0.093688
+    pred_conv1d__x__pos_FWD             : 0.029320
+    pred_conv1d__x__tier_budget         : 0.123087
+    pred_conv1d__x__tier_premium        : 0.035270
+
+[Wariant FPLLOSS] Najlepszy pojedynczy model na valid: XGBOOST (FPLLoss=9.0178)
+  Wagi meta_nnls (fplloss): intercept=-0.245072
+    glm       : 0.326206
+    xgboost   : 0.488706
+    mlp       : 0.213657
+    conv1d    : 0.256046
+  Wagi meta_context (fplloss, p=44): intercept=-0.238733
+    pred_glm                            : 0.119625
+    pred_xgboost                        : 0.337335
+    pred_mlp                            : 0.142138
+    pred_conv1d                         : 0.068346
+    pos_MID                             : 0.037278
+    pos_FWD                             : 0.045301
+    tier_budget                         : 0.000343
+    tier_mid                            : 0.032744
+    tier_premium                        : 0.040692
+    minutes_ema_3_norm                  : 0.040422
+    pred_glm__x__pos_GK                 : 0.048192
+    pred_glm__x__pos_DEF                : 0.021132
+    pred_glm__x__pos_MID                : 0.047059
+    pred_glm__x__pos_FWD                : 0.011773
+    pred_glm__x__tier_mid               : 0.043690
+    pred_glm__x__tier_premium           : 0.083987
+    pred_glm__x__minutes_ema_3_norm     : 0.063556
+    pred_xgboost__x__pos_GK             : 0.074633
+    pred_xgboost__x__pos_DEF            : 0.166621
+    pred_xgboost__x__pos_MID            : 0.006442
+    pred_xgboost__x__pos_FWD            : 0.089640
+    pred_xgboost__x__tier_budget        : 0.143605
+    pred_xgboost__x__tier_mid           : 0.129949
+    pred_xgboost__x__tier_premium       : 0.064438
+    pred_xgboost__x__minutes_ema_3_norm : 0.030406
+    pred_mlp__x__pos_GK                 : 0.044046
+    pred_mlp__x__pos_DEF                : 0.119324
+    pred_mlp__x__pos_FWD                : 0.031894
+    pred_mlp__x__tier_budget            : 0.102477
+    pred_mlp__x__tier_mid               : 0.058437
+    pred_conv1d__x__pos_MID             : 0.190946
+    pred_conv1d__x__pos_FWD             : 0.066901
+    pred_conv1d__x__tier_premium        : 0.116876
+
+===================================================================================================================
+TABELA WYNIKÓW NA ZBIORZE TESTOWYM (metrics_test.csv):
+===================================================================================================================
+               model variant level   p    mse    mae     r2  adj_r2  fplloss  mse@budget  mse@mid  mse@premium  mae@budget  mae@mid  mae@premium
+                 glm     mse  base 219 5.0773 1.2366 0.2197  0.1774  10.5730      5.3313   4.3926      15.2094      1.1447   1.1935       2.6989
+             xgboost     mse  base 219 4.7574 1.1939 0.2689  0.2292   9.9236      4.9715   4.2269      12.4763      1.1135   1.1528       2.5340
+                 mlp     mse  base 219 4.9194 1.1711 0.2440  0.2030  10.4029      4.9566   4.3861      14.0409      1.0981   1.1224       2.5877
+              conv1d     mse  base  39 5.5094 1.2510 0.1533  0.1455  12.6711      4.7993   5.0015      19.8986      1.1070   1.2241       2.8266
+           meta_nnls     mse  meta   4 4.6886 1.2250 0.2795  0.2788   9.8617      4.7904   4.1812      12.8604      1.1130   1.1933       2.6412
+        meta_context     mse  meta  44 4.6790 1.2183 0.2809  0.2734   9.8693      4.7405   4.1780      13.0447      1.1009   1.1901       2.6127
+       mean_ensemble     mse  meta   4 4.9019 1.1866 0.2467  0.2460  10.4895      4.9163   4.3525      14.4799      1.0962   1.1468       2.5811
+best_single(xgboost)     mse  meta 219 4.7574 1.1939 0.2689  0.2292   9.9236      4.9715   4.2269      12.4763      1.1135   1.1528       2.5340
+                 glm fplloss  base 219 5.0080 1.3067 0.2304  0.1886  10.2587      5.3275   4.3613      13.9705      1.2169   1.2697       2.6469
+             xgboost fplloss  base 219 4.8192 1.2328 0.2594  0.2192   9.9654      5.1131   4.2324      12.9214      1.1345   1.1987       2.5872
+                 mlp fplloss  base 219 4.9169 1.2485 0.2444  0.2034  10.2804      5.0841   4.3527      13.5876      1.1490   1.2126       2.6416
+              conv1d fplloss  base  39 5.4621 1.3321 0.1606  0.1528  12.3663      4.7710   4.9046      20.5814      1.1899   1.3038       2.9185
+           meta_nnls fplloss  meta   4 4.7409 1.2416 0.2714  0.2707   9.8973      4.9138   4.1894      13.1433      1.0887   1.2265       2.6767
+        meta_context fplloss  meta  44 4.7650 1.2283 0.2677  0.2601   9.9046      4.9823   4.1874      13.2886      1.0691   1.2157       2.6674
+       mean_ensemble fplloss  meta   4 4.8831 1.2517 0.2496  0.2489  10.3569      4.9350   4.3292      14.2545      1.1385   1.2231       2.6212
+best_single(xgboost) fplloss  meta 219 4.8192 1.2328 0.2594  0.2192   9.9654      5.1131   4.2324      12.9214      1.1345   1.1987       2.5872
+===================================================================================================================
+Czas całkowity wykonania eksperymentu: 1748.67 s

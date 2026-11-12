@@ -10,14 +10,14 @@ from tqdm.auto import tqdm
 from .custom_metrics import CustomMAE, CustomMSE
 
 
-
-
 def set_seed(seed: int = 77):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 class Trainer:
@@ -34,8 +34,7 @@ class Trainer:
         scaler: sklearn.preprocessing.StandardScaler = None,
     ):
 
-        torch.manual_seed(random_state)
-        np.random.seed(random_state)
+        set_seed(random_state)
 
         self.device = device
         self.num_features = num_features
@@ -117,43 +116,60 @@ class Trainer:
             self._adjusted_r2(r2, n_samples),
         )
 
+    @staticmethod
+    def _unpack_batch(batch, device: str):
+        if len(batch) == 3:
+            X, y, aux = batch
+            return X.to(device), y.to(device), aux.to(device)
+        X, y = batch
+        X = X.to(device)
+        return X, y.to(device), X
+
     def train_step(self, dataloader, model, optimizer, loss_fn):
         model.train()
         self._reset_metrics()
         total_loss = 0.0
+        n_seen = 0
 
-        for X, y in dataloader:
-            X, y = X.to(self.device), y.to(self.device)
+        for batch in dataloader:
+            X, y, aux = self._unpack_batch(batch, self.device)
             optimizer.zero_grad()
             pred = model(X)
-            loss = loss_fn(pred, y, X)
+            loss = loss_fn(pred, y, aux)
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
-            self._update_metrics(pred.detach(), y, X)
+            bs = len(y)
+            total_loss += loss.item() * bs
+            n_seen += bs
+            self._update_metrics(pred.detach(), y, aux)
 
-        n_samples = len(dataloader.dataset)
-        return total_loss / len(dataloader), *self._compute_metrics(n_samples)
+        n_samples = max(n_seen, 1)
+        return total_loss / n_samples, *self._compute_metrics(n_samples)
 
     def test_step(self, dataloader, model, loss_fn):
         model.eval()
         self._reset_metrics()
         total_loss = 0.0
+        n_seen = 0
         preds_all = []
 
         with torch.no_grad():
-            for X, y in dataloader:
-                X, y = X.to(self.device), y.to(self.device)
+            for batch in dataloader:
+                X, y, aux = self._unpack_batch(batch, self.device)
                 pred = model(X)
 
-                total_loss += loss_fn(pred, y, X).item()
-                self._update_metrics(pred, y, X)
+                bs = len(y)
+                pred_inv = self._inverse(pred)
+                y_inv = self._inverse(y)
+                total_loss += loss_fn(pred_inv, y_inv, aux).item() * bs
+                n_seen += bs
+                self._update_metrics(pred, y, aux)
                 preds_all.append(pred.cpu())
 
-        n_samples = len(dataloader.dataset)
+        n_samples = max(n_seen, 1)
         return (
-            total_loss / len(dataloader),
+            total_loss / n_samples,
             *self._compute_metrics(n_samples),
             torch.cat(preds_all),
         )
@@ -185,17 +201,19 @@ class Trainer:
             "mae@premium": mae_p,
         }
 
-    def predict_dataloader(self, dataloader, model) -> np.ndarray:
+    def predict_dataloader(self, dataloader, model, clip_preds: bool = True) -> np.ndarray:
         model.eval()
         preds_all = []
         with torch.no_grad():
-            for X, _ in dataloader:
-                X = X.to(self.device)
+            for batch in dataloader:
+                X = batch[0].to(self.device)
                 pred = model(X)
                 preds_all.append(pred.cpu())
         preds_tensor = torch.cat(preds_all)
         preds_inv = self._inverse(preds_tensor).detach().cpu().numpy().flatten()
-        return np.clip(preds_inv, 0.0, 15.0)
+        if clip_preds:
+            return np.clip(preds_inv, 0.0, 15.0)
+        return preds_inv
 
     def model_eval(
         self,
@@ -218,7 +236,7 @@ class Trainer:
         counter = 0
         results = defaultdict(list)
 
-        for epoch in tqdm(range(num_epochs), desc=model.__class__.__name__):
+        for epoch in tqdm(range(num_epochs), desc=model.__class__.__name__, disable=not verbose):
 
             (
                 tr_loss,
@@ -289,7 +307,7 @@ class Trainer:
             results["train_adj_r2"].append(tr_adj_r2)
             results["test_adj_r2"].append(ts_adj_r2)
 
-            if epoch % 10 == 0:
+            if verbose and epoch % 10 == 0:
                 current_lr = optimizer.param_groups[0]["lr"]
                 print(
                     f"Epoch {epoch:4d} | Current LR: {current_lr:.6f}\n"
@@ -315,7 +333,8 @@ class Trainer:
             else:
                 counter += 1
                 if counter >= patience:
-                    print(f"Early stopping at epoch {epoch}")
+                    if verbose:
+                        print(f"Early stopping at epoch {epoch}")
                     break
 
         return dict(results), best_state

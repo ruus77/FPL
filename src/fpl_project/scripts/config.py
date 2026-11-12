@@ -7,8 +7,10 @@ load_dotenv()
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DATA_DIR = ROOT_DIR / "Data"
+RESULTS_DIR = ROOT_DIR / "results"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 EDA = DATA_DIR / "eda.parquet"
 FEATURES_ENGINEERING = DATA_DIR / "features_engineering.parquet"
