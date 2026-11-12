@@ -26,7 +26,7 @@ Progi cenowe na zbiorze `train`: $p_{\text{low}} = 4.5000$ mln £ (kwantyl `0.50
 
 ## 3. Funkcja straty `FPLLoss` i stałe konfiguracyjne
 Stałe funkcji straty zdefiniowane w `src/fpl_project/scripts/config.py`:
-- `EPS_MIN` ($\varepsilon_{\min}$) = `0.1`
+- `EPS_MIN` ($\varepsilon_{\min}$ / $\eta$) = `0.05`
 - `W_MID` ($w_{\text{mid}}$) = `1.25`
 - `W_PREMIUM` ($w_{\text{premium}}$) = `2.0`
 - Stała normalizująca $c$ (`norm_const` $= \text{mean}(\ln(1 + m_i) + \varepsilon_{\min})$ na `train`, gdzie $m_i = \text{clip}(\text{minutes\_ema\_3} / 90, 0, 1)$): **`0.3169`**
