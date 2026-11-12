@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
+import sklearn
 import sklearn.base
-from sklearn.model_selection import ParameterSampler, RandomizedSearchCV, TimeSeriesSplit
+from sklearn.metrics import make_scorer
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import torch
 from torchmetrics import R2Score
 import xgboost as xgb
@@ -130,7 +132,11 @@ class ModelSelector:
         sample_weight: np.ndarray | None = None,
     ) -> float:
         """Compute negative MSE (unweighted) or negative FPLLoss weighted MSE on a CV validation fold."""
-        err_sq = (np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)) ** 2
+        y_p = np.asarray(y_pred, dtype=np.float64)
+        if not np.all(np.isfinite(y_p)):
+            return -float("inf")
+        y_p = np.clip(y_p, 0.0, 15.0)
+        err_sq = (np.asarray(y_true, dtype=np.float64) - y_p) ** 2
         if sample_weight is not None:
             w = np.asarray(sample_weight, dtype=np.float64)
             return -float(np.mean(w * err_sq))
@@ -151,6 +157,7 @@ class ModelSelector:
         cv_splits: list[tuple[np.ndarray, np.ndarray]] | None = None,
         price_unscaled: np.ndarray | None = None,
     ):
+        sklearn.set_config(enable_metadata_routing=True)
         scoring_label = scoring if scoring else (
             "neg_weighted_mse" if sample_weight is not None else self.scoring
         )
@@ -161,71 +168,53 @@ class ModelSelector:
         X = X_train.to_numpy() if hasattr(X_train, "to_numpy") else np.asarray(X_train)
         y = y_train.to_numpy() if hasattr(y_train, "to_numpy") else np.asarray(y_train)
         w = np.asarray(sample_weight, dtype=np.float64) if sample_weight is not None else None
+        columns_list = list(X_train.columns) if hasattr(X_train, "columns") else []
 
-        if cv_splits is None:
-            tss = TimeSeriesSplit(n_splits=cv)
-            splits = list(tss.split(X))
-        else:
-            splits = list(cv_splits)
+        cv_splitter = list(cv_splits) if cv_splits is not None else TimeSeriesSplit(n_splits=cv)
+        scorer = make_scorer(self.score_fold, greater_is_better=True)
+        if w is not None:
+            scorer = scorer.set_score_request(sample_weight=True)
 
         for model, name, grid in zip(models, models_names, params_grid):
-            if isinstance(model, CatBoostRegressor):
-                model.set_params(allow_writing_files=False)
+            est = sklearn.base.clone(model)
+            if isinstance(est, CatBoostRegressor):
+                est.set_params(allow_writing_files=False)
 
-            candidates = list(ParameterSampler(grid, n_iter=n_iter, random_state=self.random_state))
-            print(
-                f"Fitting {len(splits)} folds for each of {len(candidates)} candidates, "
-                f"totalling {len(splits) * len(candidates)} fits ({name}, scoring={scoring_label})",
-                flush=True,
+            if w is not None and hasattr(est, "set_fit_request"):
+                est.set_fit_request(sample_weight=True)
+
+            random_search = RandomizedSearchCV(
+                cv=cv_splitter,
+                n_iter=n_iter,
+                estimator=est,
+                param_distributions=grid,
+                scoring=scorer,
+                random_state=self.random_state,
+                n_jobs=1,
+                verbose=1,
+                error_score=-float("inf"),
+                refit=True,
             )
 
-            best_score = -float("inf")
-            best_params = None
-
-            for cand_params in candidates:
-                fold_scores = []
-                valid_candidate = True
-                for tr_idx, val_idx in splits:
-                    est = sklearn.base.clone(model)
-                    est.set_params(**cand_params)
-
-                    X_tr, y_tr = X[tr_idx], y[tr_idx]
-                    X_val, y_val = X[val_idx], y[val_idx]
-
-                    try:
-                        if w is not None:
-                            est.fit(X_tr, y_tr, sample_weight=w[tr_idx])
-                        else:
-                            est.fit(X_tr, y_tr)
-                        y_val_pred = np.asarray(est.predict(X_val), dtype=np.float64)
-                        if not np.all(np.isfinite(y_val_pred)):
-                            valid_candidate = False
-                            break
-                        y_val_pred = np.clip(y_val_pred, 0.0, 15.0)
-                        w_val = w[val_idx] if w is not None else None
-                        fold_scores.append(self.score_fold(y_val, y_val_pred, sample_weight=w_val))
-                    except Exception:
-                        valid_candidate = False
-                        break
-
-                if valid_candidate and fold_scores:
-                    mean_score = float(np.mean(fold_scores))
-                    if mean_score > best_score:
-                        best_score = mean_score
-                        best_params = cand_params
-
-            if best_params is None:
-                best_params = candidates[0]
-
-            best_estimator = sklearn.base.clone(model)
-            best_estimator.set_params(**best_params)
-            if w is not None:
-                best_estimator.fit(X, y, sample_weight=w)
+            if isinstance(est, CatBoostRegressor) and cat_features:
+                cat_indices = [columns_list.index(c) for c in cat_features]
+                est.set_params(cat_features=cat_indices)
+                random_search.fit(X, y)
+            elif w is not None:
+                random_search.fit(X, y, sample_weight=w)
             else:
-                best_estimator.fit(X, y)
+                random_search.fit(X, y)
 
+            best_estimator = random_search.best_estimator_
             best_models_map[name] = best_estimator
-            y_train_pred = best_estimator.predict(X)
+            best_score = float(random_search.best_score_)
+            best_params = random_search.best_params_
+
+            if isinstance(est, CatBoostRegressor) and cat_features:
+                eval_pool = self._to_pool(X, y, cat_feat=cat_indices)
+                y_train_pred = best_estimator.predict(eval_pool)
+            else:
+                y_train_pred = best_estimator.predict(X)
 
             if price_unscaled is not None:
                 x_for_metrics = np.zeros((X.shape[0], max(X.shape[1], self.mse_at.value_idx + 1)), dtype=np.float32)
