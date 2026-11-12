@@ -1,5 +1,6 @@
 from pathlib import Path
 from dotenv import load_dotenv
+import scipy.stats as stats
 
 SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"]
 
@@ -7,6 +8,26 @@ SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"]
 SEED = 77
 CV_SPLITS = 5
 N_ITER_SEARCH = 20
+
+# Siatki hiperparametrów dla modeli tabelarycznych (RandomizedSearchCV)
+GLM_PARAM_GRID = {
+    "alpha": stats.loguniform(1e-5, 0.01),
+    "l1_ratio": stats.uniform(loc=0.0, scale=1.0),
+    "family": ["poisson", "negative.binomial", "tweedie", "normal"],
+    "link": ["auto", "log"],
+}
+
+XGB_PARAM_GRID = {
+    "n_estimators": stats.randint(150, 500),
+    "max_depth": stats.randint(3, 7),
+    "learning_rate": stats.uniform(0.01, 0.05),
+    "subsample": stats.uniform(0.7, 0.3),
+    "colsample_bytree": stats.uniform(0.6, 0.3),
+    "min_child_weight": stats.randint(1, 10),
+    "gamma": stats.uniform(0.0, 5.0),
+    "reg_alpha": stats.uniform(0.0, 2.0),
+    "reg_lambda": stats.uniform(0.5, 3.0),
+}
 
 # Stałe funkcji straty FPLLoss i progów cenowych
 PRICE_QUANTILE_LOW = 0.50

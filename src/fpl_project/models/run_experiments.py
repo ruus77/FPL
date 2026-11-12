@@ -5,9 +5,9 @@ import time
 import warnings
 
 from glum import GeneralizedLinearRegressor
+from glum._glm import get_family, get_link
 import numpy as np
 import pandas as pd
-import scipy.stats as stats
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import StandardScaler
@@ -96,27 +96,6 @@ class MSELossWrapper(nn.Module):
         x: torch.Tensor | None = None,
     ) -> torch.Tensor:
         return self.mse(y_pred.flatten(), y_true.flatten())
-
-
-class GLMFamilyDistributionSampler:
-    """Samples GLM families: Poisson, NegativeBinomial(theta), and Tweedie(power)."""
-
-    def __init__(self, theta_mom: float = 1.0):
-        self.theta_mom = float(np.clip(theta_mom, 0.05, 5.0))
-
-    def rvs(self, random_state=None):
-        rng = np.random.default_rng(random_state)
-        choice = int(rng.integers(0, 3))
-        if choice == 0:
-            return "poisson"
-        if choice == 1:
-            if rng.random() < 0.25:
-                theta = self.theta_mom
-            else:
-                theta = float(np.exp(rng.uniform(np.log(0.05), np.log(2.5))))
-            return f"negative.binomial({theta:.4f})"
-        power = float(rng.uniform(1.1, 1.9))
-        return f"tweedie({power:.4f})"
 
 
 class AuxSequenceDataset(Dataset):
@@ -562,34 +541,27 @@ def tune_tabular_models(
     device: str,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, dict]]:
     """Tune and fit GLM and XGBoost in MSE and FPLLoss variants using TimeSeriesSplit CV."""
+    nb_default = get_family("negative.binomial")
+    tw_default = get_family("tweedie")
+    auto_links = {
+        fam_name: type(get_link("auto", get_family(fam_name))).__name__
+        for fam_name in ["poisson", "negative.binomial", "tweedie", "normal"]
+    }
+    print("=" * 90)
+    print("DOMYŚLNE PARAMETRY W BIBLIOTECE GLUM (glum._glm.get_family / get_link):")
+    print(f'  family="negative.binomial" (bez parametru) -> theta = {float(nb_default.theta):.1f} ({type(nb_default).__name__})')
+    print(f'  family="tweedie"           (bez parametru) -> power = {float(tw_default.power):.1f} ({type(tw_default).__name__})')
+    print(
+        '  link="auto" dla rodzin                     -> '
+        + ", ".join(f'{k}: {v}' for k, v in auto_links.items())
+    )
+    print("=" * 90)
+
     cv_splits = make_gw_time_series_splits(
         seasons=data.X_train_raw["season"],
         gws=data.X_train_raw["gw"],
         n_splits=config.CV_SPLITS,
     )
-
-    y_tr_np = data.y_train_raw.to_numpy(dtype=np.float64)
-    y_mean = float(np.mean(y_tr_np))
-    y_var = float(np.var(y_tr_np))
-    theta_mom = max((y_var - y_mean) / max(y_mean ** 2, 1e-6), 0.05)
-
-    glm_grid = {
-        "family": GLMFamilyDistributionSampler(theta_mom=theta_mom),
-        "alpha": stats.loguniform(1e-4, 1.0),
-        "l1_ratio": stats.uniform(loc=0.0, scale=1.0),
-        "link": ["auto", "log"],
-    }
-    xgb_grid = {
-        "n_estimators": stats.randint(150, 500),
-        "max_depth": stats.randint(3, 7),
-        "learning_rate": stats.uniform(0.01, 0.05),
-        "subsample": stats.uniform(0.7, 0.3),
-        "colsample_bytree": stats.uniform(0.6, 0.3),
-        "min_child_weight": stats.randint(1, 10),
-        "gamma": stats.uniform(0.0, 5.0),
-        "reg_alpha": stats.uniform(0.0, 2.0),
-        "reg_lambda": stats.uniform(0.5, 3.0),
-    }
 
     val_idx_tab = list(data.X_train_tab.columns).index("num__value_ema_3")
     selector = ModelSelector(
@@ -622,7 +594,7 @@ def tune_tabular_models(
         cv_df, best_map = selector.params_search(
             models=[glm_est, xgb_est],
             models_names=["glm", "xgboost"],
-            params_grid=[glm_grid, xgb_grid],
+            params_grid=[config.GLM_PARAM_GRID, config.XGB_PARAM_GRID],
             X_train=data.X_train_tab,
             y_train=data.y_train_raw,
             cv=config.CV_SPLITS,
@@ -1146,6 +1118,28 @@ def save_results(
     tc_test = df_tier_counts[df_tier_counts["split"] == "test"].iloc[0]
     n_test_gws = int(test_df["gw"].nunique())
 
+    nb_default = get_family("negative.binomial")
+    tw_default = get_family("tweedie")
+    auto_links = {
+        fam_name: type(get_link("auto", get_family(fam_name))).__name__
+        for fam_name in ["poisson", "negative.binomial", "tweedie", "normal"]
+    }
+    glm_params_mse = best_params_log.get("glm_mse", {})
+    glm_params_fpl = best_params_log.get("glm_fplloss", {})
+
+    metrics_md_lines = [
+        "| Model | Wariant | Poziom | $p$ | MSE | MAE | $R^2$ | Adj $R^2$ | FPLLoss | MSE budget | MSE mid | MSE premium | MAE budget | MAE mid | MAE premium |",
+        "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for _, r in df_metrics_test.iterrows():
+        metrics_md_lines.append(
+            f"| `{r['model']}` | `{r['variant']}` | `{r['level']}` | {int(r['p'])} | "
+            f"{r['mse']:.4f} | {r['mae']:.4f} | {r['r2']:.4f} | {r['adj_r2']:.4f} | {r['fplloss']:.4f} | "
+            f"{r['mse@budget']:.4f} | {r['mse@mid']:.4f} | {r['mse@premium']:.4f} | "
+            f"{r['mae@budget']:.4f} | {r['mae@mid']:.4f} | {r['mae@premium']:.4f} |"
+        )
+    metrics_md_table = "\n".join(metrics_md_lines)
+
     readme_content = f"""# Eksperymenty Predykcji Punktów FPL — Modele Bazowe, FPLLoss i Meta-Modele
 
 ## 1. Uruchomienie eksperymentu
@@ -1182,12 +1176,32 @@ Stałe funkcji straty zdefiniowane w `src/fpl_project/scripts/config.py`:
 Wzór wagi obserwacji:
 $$w_i = \\frac{{w_{{\\text{{cena}}, i}} \\cdot (\\ln(1 + m_i) + \\varepsilon_{{\\min}})}}{{c}}, \\quad w_{{\\text{{cena}}, i}} \\in \\{{1.0, {config.W_MID}, {config.W_PREMIUM}\\}}, \\quad c = {data.c_norm:.4f}$$
 
-## 4. Realizacja wariantu (B) dla GLM i XGBoost
-- **XGBoost (`objective="reg:squarederror"`)**: przekazanie `sample_weight = w_i` do `fit()` minimalizuje ważony błąd średniokwadratowy $\\sum_i w_i (y_i - \\hat{{y}}_i)^2$.
-- **GLM (`glum.GeneralizedLinearRegressor`)**: przekazanie `sample_weight = w_i` maksymalizuje ważoną log-wiarygodność wybranej rodziny rozkładu (Poisson, Negative Binomial ze strojonym $\\theta$, Tweedie z mocą $p \\in [1.1, 1.9]$) — analog `FPLLoss`.
-- W `TimeSeriesSplit` CV (granice foldów pomiędzy kolejkami `(season, gw)`) wagi `w_i` przekazywane są do `estimator.fit()` oraz do ważonego kryterium oceny foldu (`neg_weighted_mse`).
+## 4. Konfiguracja GLM (`glum`) i realizacja wariantu (B)
+- **Przestrzeń przeszukiwania GLM (`GLM_PARAM_GRID`)**:
+  - `alpha`: `stats.loguniform(1e-5, 0.01)`
+  - `l1_ratio`: `stats.uniform(loc=0.0, scale=1.0)`
+  - `family`: `["poisson", "negative.binomial", "tweedie", "normal"]`
+  - `link`: `["auto", "log"]`
+- **Domyślne parametry w bibliotece `glum` (`glum._glm.get_family` oraz `glum._glm.get_link`)**:
+  - `family="negative.binomial"` (bez podanego parametru) przyjmuje $\\theta = {float(nb_default.theta):.1f}$ (`NegativeBinomialDistribution(1.0)`),
+  - `family="tweedie"` (bez podanego parametru) przyjmuje moc $p = {float(tw_default.power):.1f}$ (`TweedieDistribution(1.5)`),
+  - `link="auto"` zwraca dla poszczególnych rodzin:
+    - `"poisson"` $\\rightarrow$ `{auto_links['poisson']}` (`log`),
+    - `"negative.binomial"` $\\rightarrow$ `{auto_links['negative.binomial']}` (`log`),
+    - `"tweedie"` $\\rightarrow$ `{auto_links['tweedie']}` (`log`),
+    - `"normal"` $\\rightarrow$ `{auto_links['normal']}` (`identity`).
+- **Wybrane hiperparametry GLM w `RandomizedSearchCV`**:
+  - Wariant `mse`: `{glm_params_mse}`
+  - Wariant `fplloss`: `{glm_params_fpl}`
+- **Wariant (B) dla GLM i XGBoost**:
+  - **XGBoost (`objective="reg:squarederror"`)**: przekazanie `sample_weight = w_i` do `fit()` minimalizuje ważony błąd średniokwadratowy $\\sum_i w_i (y_i - \\hat{{y}}_i)^2$.
+  - **GLM (`glum.GeneralizedLinearRegressor`)**: przekazanie `sample_weight = w_i` maksymalizuje ważoną log-wiarygodność wybranej rodziny rozkładu.
+  - W `TimeSeriesSplit` CV (granice foldów pomiędzy kolejkami `(season, gw)`) wagi `w_i` przekazywane są do `estimator.fit()` oraz do ważonego kryterium oceny foldu (`neg_weighted_mse`).
 
-## 5. Pliki wynikowe w katalogu `results/`
+## 5. Wyniki na zbiorze testowym (`metrics_test.csv`)
+{metrics_md_table}
+
+## 6. Pliki wynikowe w katalogu `results/`
 - `metrics_test.csv`, `metrics_valid.csv` — metryki na zbiorze testowym i walidacyjnym,
 - `tier_counts.csv` — liczebności grup `budget`, `mid`, `premium` dla `train`, `valid`, `test`,
 - `table_tiers.csv` — tabela MSE i MAE w podziale na grupy cenowe (zaokrąglona do 2 miejsc po przecinku),
