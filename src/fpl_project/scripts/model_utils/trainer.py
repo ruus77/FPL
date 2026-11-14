@@ -114,10 +114,6 @@ class Trainer:
         inv = self.scaler.inverse_transform(arr)
         return torch.tensor(inv, device=self.device)
 
-    def set_model_config(self, value_idx: int, model_type: str) -> None:
-        self.mse_at.set_config(value_idx=value_idx, model_type=model_type)
-        self.mae_at.set_config(value_idx=value_idx, model_type=model_type)
-
     def _reset_metrics(self) -> None:
         self.mse_at.reset()
         self.mae_at.reset()

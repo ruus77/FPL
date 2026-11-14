@@ -36,10 +36,6 @@ EPS_MIN = 0.1
 W_MID = 1.25
 W_PREMIUM = 2.0
 
-eps_min = EPS_MIN
-w_mid = W_MID
-w_premium = W_PREMIUM
-
 # Zakres obcinania predykcji i regularyzacja meta-modelu
 PRED_CLIP_MIN = 0.0
 PRED_CLIP_MAX = 15.0
@@ -68,6 +64,7 @@ load_dotenv()
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DATA_DIR = ROOT_DIR / "Data"
 RESULTS_DIR = ROOT_DIR / "results"
+TRAINED_MODELS_DIR = ROOT_DIR / "trained_models"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,13 +72,6 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 EDA = DATA_DIR / "eda.parquet"
 FEATURES_ENGINEERING = DATA_DIR / "features_engineering.parquet"
 
-ML_PREDS_PATH = DATA_DIR / "ml_preds.parquet"
-
-PREDS_GLM = DATA_DIR / "preds_glm.parquet"
-PREDS_XGBOOST = DATA_DIR / "preds_xgboost.parquet"
-PREDS_MLP = DATA_DIR / "preds_mlp.parquet"
-PREDS_CONV1D = DATA_DIR / "preds_conv1d.parquet"
-PREDS_RF_META = DATA_DIR / "preds_rf_meta.parquet"
 PREDS_GLM_META = DATA_DIR / "preds_glm_meta.parquet"
 
 # Ścieżki plików wynikowych w results/
@@ -92,8 +82,5 @@ TIER_COUNTS_PATH = RESULTS_DIR / "tier_counts.csv"
 META_WEIGHTS_PATH = RESULTS_DIR / "meta_weights.csv"
 PREDS_VALID_PATH = RESULTS_DIR / "preds_valid.parquet"
 PREDS_TEST_PATH = RESULTS_DIR / "preds_test.parquet"
+PREDS_PREDICT_PATH = RESULTS_DIR / "preds_predict.parquet"
 RESULTS_README_PATH = RESULTS_DIR / "README.md"
-
-
-def get_preds_path(algorithm_name: str) -> Path:
-    return DATA_DIR / f"preds_{algorithm_name.lower()}.parquet"

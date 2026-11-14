@@ -5,7 +5,7 @@ import torch
 class BaseMetric(Metric):
     def __init__(self, p_low: float, p_high: float, value_idx: int, model_type: str = "mlp"):
         super().__init__()
-        assert model_type in ("mlp", "lstm", "conv1d"), f"Nieznany model_type: {model_type}"
+        assert model_type in ("mlp", "conv1d"), f"Nieznany model_type: {model_type}"
 
         self.p_low = p_low
         self.p_high = p_high
@@ -22,7 +22,7 @@ class BaseMetric(Metric):
     def _get_price(self, x: torch.Tensor) -> torch.Tensor:
         if self.model_type == "mlp":
             return x[:, self.value_idx]
-        elif self.model_type in ["lstm", "conv1d"]:
+        elif self.model_type == "conv1d":
             return x[:, -1, self.value_idx]
 
     def _apply_masks(self, price: torch.Tensor):
@@ -31,11 +31,6 @@ class BaseMetric(Metric):
             (price >= self.p_low) & (price < self.p_high),
             price >= self.p_high,
         )
-
-    def set_config(self, value_idx: int, model_type: str):
-        assert model_type in ("mlp", "lstm", "conv1d"), f"Nieznany model_type: {model_type}"
-        self.value_idx = value_idx
-        self.model_type = model_type
 
 
 class CustomMSE(BaseMetric):

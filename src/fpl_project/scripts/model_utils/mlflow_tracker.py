@@ -2,7 +2,6 @@ from datetime import datetime
 import sys
 import urllib.request
 import mlflow
-import mlflow.pytorch
 
 from fpl_project.scripts import config
 
@@ -46,17 +45,3 @@ class MlflowTracker:
             if isinstance(v, (int, float))
         }
         mlflow.log_metrics(clean_metrics, step=step)
-
-    @staticmethod
-    def log_model(model, artifact_path: str = None, name: str = None, input_example=None):
-        model_name = name or artifact_path or "model"
-        try:
-            if input_example is not None:
-                mlflow.pytorch.log_model(model, name=model_name, input_example=input_example)
-            else:
-                mlflow.pytorch.log_model(model, name=model_name, serialization_format="pickle")
-        except Exception:
-            try:
-                mlflow.pytorch.log_model(model, artifact_path=model_name, serialization_format="pickle")
-            except Exception as e:
-                print(f"Warning: Failed to log model to MLflow: {e}")

@@ -6,8 +6,6 @@ from sklearn.metrics import make_scorer
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import torch
 from torchmetrics import R2Score
-import xgboost as xgb
-from catboost import CatBoostRegressor, Pool
 
 from fpl_project.scripts.model_utils.custom_metrics import CustomMAE, CustomMSE
 
@@ -114,18 +112,6 @@ class ModelSelector:
         return mse_dict, mae_dict, r2_val
 
     @staticmethod
-    def _to_dmatrix(X, y) -> xgb.DMatrix:
-        X = X.to_numpy() if hasattr(X, "to_numpy") else X
-        y = y.to_numpy() if hasattr(y, "to_numpy") else y
-        return xgb.DMatrix(data=X, label=y)
-
-    @staticmethod
-    def _to_pool(X, y, cat_feat) -> Pool:
-        X = X.to_numpy() if hasattr(X, "to_numpy") else X
-        y = y.to_numpy() if hasattr(y, "to_numpy") else y
-        return Pool(data=X, label=y, cat_features=cat_feat)
-
-    @staticmethod
     def score_fold(
         y_true: np.ndarray,
         y_pred: np.ndarray,
@@ -152,7 +138,6 @@ class ModelSelector:
         cv: int = 5,
         scoring: str | None = None,
         n_iter: int = 20,
-        cat_features: list[str] | None = None,
         sample_weight: np.ndarray | None = None,
         cv_splits: list[tuple[np.ndarray, np.ndarray]] | None = None,
         price_unscaled: np.ndarray | None = None,
@@ -168,7 +153,6 @@ class ModelSelector:
         X = X_train.to_numpy() if hasattr(X_train, "to_numpy") else np.asarray(X_train)
         y = y_train.to_numpy() if hasattr(y_train, "to_numpy") else np.asarray(y_train)
         w = np.asarray(sample_weight, dtype=np.float64) if sample_weight is not None else None
-        columns_list = list(X_train.columns) if hasattr(X_train, "columns") else []
 
         cv_splitter = list(cv_splits) if cv_splits is not None else TimeSeriesSplit(n_splits=cv)
         scorer = make_scorer(self.score_fold, greater_is_better=True)
@@ -177,8 +161,6 @@ class ModelSelector:
 
         for model, name, grid in zip(models, models_names, params_grid):
             est = sklearn.base.clone(model)
-            if isinstance(est, CatBoostRegressor):
-                est.set_params(allow_writing_files=False)
 
             if w is not None and hasattr(est, "set_fit_request"):
                 est.set_fit_request(sample_weight=True)
@@ -196,11 +178,7 @@ class ModelSelector:
                 refit=True,
             )
 
-            if isinstance(est, CatBoostRegressor) and cat_features:
-                cat_indices = [columns_list.index(c) for c in cat_features]
-                est.set_params(cat_features=cat_indices)
-                random_search.fit(X, y)
-            elif w is not None:
+            if w is not None:
                 random_search.fit(X, y, sample_weight=w)
             else:
                 random_search.fit(X, y)
@@ -210,11 +188,7 @@ class ModelSelector:
             best_score = float(random_search.best_score_)
             best_params = random_search.best_params_
 
-            if isinstance(est, CatBoostRegressor) and cat_features:
-                eval_pool = self._to_pool(X, y, cat_feat=cat_indices)
-                y_train_pred = best_estimator.predict(eval_pool)
-            else:
-                y_train_pred = best_estimator.predict(X)
+            y_train_pred = best_estimator.predict(X)
 
             if price_unscaled is not None:
                 x_for_metrics = np.zeros((X.shape[0], max(X.shape[1], self.mse_at.value_idx + 1)), dtype=np.float32)
@@ -245,39 +219,3 @@ class ModelSelector:
             pd.DataFrame(results_list).sort_values(by=f"cv_mean_{scoring_label}", ascending=False),
             best_models_map,
         )
-
-    def evaluate(self, trained_models_map, X_eval, y_eval):
-        results_list = []
-        y_preds = {}
-
-        X_eval_np = X_eval.to_numpy() if hasattr(X_eval, "to_numpy") else X_eval
-        y_eval_np = y_eval.to_numpy() if hasattr(y_eval, "to_numpy") else y_eval
-
-        for name, model in trained_models_map.items():
-            if isinstance(model, CatBoostRegressor):
-                eval_pool = self._to_pool(X_eval_np, y_eval_np, cat_feat=model.get_cat_features())
-                y_pred = model.predict(eval_pool)
-            else:
-                y_pred = model.predict(X_eval_np)
-
-            y_preds[name] = y_pred
-
-            mse_dict, mae_dict, r2_val = self.metrics_report(y_pred=y_pred, y_true=y_eval_np, x=X_eval_np)
-
-            row = {
-                "data": "test",
-                "model_name": name,
-                "mse@budget": mse_dict["mse@budget"].item(),
-                "mse@mid": mse_dict["mse@mid"].item(),
-                "mse@premium": mse_dict["mse@premium"].item(),
-                "mae@budget": mae_dict["mae@budget"].item(),
-                "mae@mid": mae_dict["mae@mid"].item(),
-                "mae@premium": mae_dict["mae@premium"].item(),
-                "r2": r2_val,
-            }
-            results_list.append(row)
-
-        df_results = pd.DataFrame(results_list)
-        sort_column = f"cv_mean_{self.scoring}" if f"cv_mean_{self.scoring}" in df_results.columns else "mse@premium"
-
-        return df_results.sort_values(by=sort_column, ascending=False, errors="ignore"), y_preds

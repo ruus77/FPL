@@ -21,6 +21,7 @@ mlartifacts/**
 mlflow.db
 *.pt
 *.pth
+trained_models/
 *.db
 
 .env

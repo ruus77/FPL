@@ -3,8 +3,6 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-import torch
-from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from fpl_project.scripts.data_utils.features_config import FeaturesConfig
 
@@ -83,348 +81,35 @@ def scale_target(
 
 
 class FPLDataPipe:
+    """Tabular preprocessing: one-hot encoding of categorical and standardisation of numeric columns."""
+
     def __init__(
         self,
         num_cols: list[str],
         cat_cols: list[str],
         batch_size: int = 64,
-        catboost_flag: bool = False,
     ):
         self.num_cols = num_cols
         self.cat_cols = cat_cols
         self.batch_size = batch_size
-        self.catboost_flag = catboost_flag
         self.preprocessor = self._build_pipeline()
-        self.valid_dataloader, self.train_dataloader, self.test_dataloader = None, None, None
 
     def _build_pipeline(self):
         num_transform = Pipeline([
             ("scaler", StandardScaler()),
         ])
 
-        if not self.catboost_flag:
-            cols_transform = Pipeline([
-                ("one_hot", OneHotEncoder(handle_unknown="ignore", sparse_output=False, drop="first")),
-            ])
+        cols_transform = Pipeline([
+            ("one_hot", OneHotEncoder(handle_unknown="ignore", sparse_output=False, drop="first")),
+        ])
 
-            preprocessor = ColumnTransformer(
-                [
-                    ("col", cols_transform, self.cat_cols),
-                    ("num", num_transform, self.num_cols),
-                ],
-                remainder="drop",
-            )
-        else:
-            preprocessor = ColumnTransformer(
-                [
-                    ("col", "passthrough", self.cat_cols),
-                    ("num", num_transform, self.num_cols),
-                ],
-                remainder="drop",
-            )
+        preprocessor = ColumnTransformer(
+            [
+                ("col", cols_transform, self.cat_cols),
+                ("num", num_transform, self.num_cols),
+            ],
+            remainder="drop",
+        )
 
         preprocessor.set_output(transform="pandas")
         return preprocessor
-
-    @staticmethod
-    def _to_tensor(X, y):
-        return (
-            torch.tensor(X.to_numpy(), dtype=torch.float32),
-            torch.tensor(y.to_numpy().reshape(-1, 1), dtype=torch.float32),
-        )
-
-    def prepare_data(self, X_train, y_train, X_valid, y_valid, X_test, y_test, X_predict=None):
-        X_train = self.preprocessor.fit_transform(X_train)
-        X_valid = self.preprocessor.transform(X_valid)
-        X_test = self.preprocessor.transform(X_test)
-        X_pred = self.preprocessor.transform(X_predict) if X_predict is not None and not X_predict.empty else None
-
-        if self.catboost_flag:
-            X_train[self.cat_cols] = X_train[self.cat_cols].astype(str)
-            X_valid[self.cat_cols] = X_valid[self.cat_cols].astype(str)
-            X_test[self.cat_cols] = X_test[self.cat_cols].astype(str)
-            if X_pred is not None:
-                X_pred[self.cat_cols] = X_pred[self.cat_cols].astype(str)
-
-        X_train_tensor, y_train_tensor = self._to_tensor(X_train, y_train)
-        X_valid_tensor, y_valid_tensor = self._to_tensor(X_valid, y_valid)
-        X_test_tensor, y_test_tensor = self._to_tensor(X_test, y_test)
-        self.X_predict_tensor = torch.tensor(X_pred.to_numpy(), dtype=torch.float32) if X_pred is not None else None
-
-        self.train_dataloader = DataLoader(
-            TensorDataset(X_train_tensor, y_train_tensor),
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
-        self.valid_dataloader = DataLoader(
-            TensorDataset(X_valid_tensor, y_valid_tensor),
-            batch_size=self.batch_size,
-            shuffle=False,
-        )
-        self.test_dataloader = DataLoader(
-            TensorDataset(X_test_tensor, y_test_tensor),
-            batch_size=self.batch_size,
-            shuffle=False,
-        )
-        if self.X_predict_tensor is not None:
-            dummy_y = torch.zeros((len(self.X_predict_tensor), 1), dtype=torch.float32)
-            self.predict_dataloader = DataLoader(
-                TensorDataset(self.X_predict_tensor, dummy_y),
-                batch_size=self.batch_size,
-                shuffle=False,
-            )
-        else:
-            self.predict_dataloader = None
-
-    def get_dataloaders(self):
-        return self.train_dataloader, self.valid_dataloader, self.test_dataloader
-
-
-class SequenceDataset(Dataset):
-    """Dataset building historical windows [t - seq_len : t] enriched with pre-game context of match t."""
-
-    def __init__(
-        self,
-        df: pd.DataFrame,
-        feature_cols: list[str],
-        context_cols: list[str] | None = None,
-        target_col: str = "total_points",
-        seq_len: int = 8,
-        player_col: str = "code",
-        time_col: str = "gw",
-        season_col: str = "season",
-        history_df: pd.DataFrame | None = None,
-    ):
-        self.seq_len = seq_len
-        self.feature_cols = feature_cols
-        self.context_cols = context_cols or []
-        n_hist = len(feature_cols)
-
-        if history_df is not None and not history_df.empty:
-            df_indexed = df.copy()
-            df_indexed["_orig_pos"] = np.arange(len(df_indexed), dtype=np.int64)
-            if target_col not in df_indexed.columns:
-                df_indexed[target_col] = 0.0
-            else:
-                df_indexed[target_col] = df_indexed[target_col].fillna(0.0)
-
-            df_sorted = df_indexed.sort_values([player_col, season_col, time_col]).reset_index(drop=True)
-
-            hist_sorted = history_df.copy().sort_values([player_col, season_col, time_col])
-            hist_sorted["_orig_pos"] = -1
-            if target_col not in hist_sorted.columns:
-                hist_sorted[target_col] = 0.0
-
-            hist_tails = {
-                player: grp.tail(seq_len)
-                for player, grp in hist_sorted.groupby(player_col, sort=False)
-            }
-
-            ordered_sequences: list[tuple[np.ndarray, float] | None] = [None] * len(df_indexed)
-
-            for player, grp in df_sorted.groupby(player_col, sort=False):
-                hist_grp = hist_tails.get(player)
-                if hist_grp is not None and not hist_grp.empty:
-                    combined = pd.concat([hist_grp, grp], ignore_index=True)
-                    n_prefix = len(hist_grp)
-                else:
-                    combined = grp.reset_index(drop=True)
-                    n_prefix = 0
-
-                feats = combined[feature_cols].values.astype(np.float32)
-                ctx_feats = (
-                    combined[self.context_cols].values.astype(np.float32)
-                    if self.context_cols
-                    else None
-                )
-                target = combined[target_col].values.astype(np.float32)
-                orig_positions = combined["_orig_pos"].values
-
-                for t in range(n_prefix, len(combined)):
-                    hist_window = self._slice_or_pad(feats, t, seq_len, n_hist)
-                    window = self._attach_context(hist_window, ctx_feats, t, seq_len)
-                    label = float(target[t])
-                    ordered_sequences[int(orig_positions[t])] = (window, label)
-
-            self.sequences = ordered_sequences
-        else:
-            self.sequences: list[tuple[np.ndarray, float]] = []
-            df_sorted = df.copy().sort_values([player_col, season_col, time_col]).reset_index(drop=True)
-            for (_, _), grp in df_sorted.groupby([player_col, season_col], sort=False):
-                feats = grp[feature_cols].values.astype(np.float32)
-                ctx_feats = (
-                    grp[self.context_cols].values.astype(np.float32)
-                    if self.context_cols
-                    else None
-                )
-                target = grp[target_col].values.astype(np.float32)
-
-                for t in range(seq_len, len(grp)):
-                    hist_window = feats[t - seq_len : t]
-                    window = self._attach_context(hist_window, ctx_feats, t, seq_len)
-                    self.sequences.append((window, float(target[t])))
-
-    @staticmethod
-    def _slice_or_pad(feats: np.ndarray, t: int, seq_len: int, n_hist: int) -> np.ndarray:
-        if t >= seq_len:
-            return feats[t - seq_len : t]
-        if t > 0:
-            pad = np.zeros((seq_len - t, n_hist), dtype=np.float32)
-            return np.vstack([pad, feats[:t]])
-        return np.zeros((seq_len, n_hist), dtype=np.float32)
-
-    @staticmethod
-    def _attach_context(
-        hist_window: np.ndarray,
-        ctx_feats: np.ndarray | None,
-        t: int,
-        seq_len: int,
-    ) -> np.ndarray:
-        if ctx_feats is None:
-            return hist_window
-        ctx_step = np.broadcast_to(ctx_feats[t], (seq_len, ctx_feats.shape[1])).astype(np.float32)
-        return np.hstack([hist_window, ctx_step])
-
-    def __len__(self) -> int:
-        return len(self.sequences)
-
-    def __getitem__(self, idx: int):
-        window, label = self.sequences[idx]
-        return torch.tensor(window, dtype=torch.float32), torch.tensor([[label]], dtype=torch.float32)
-
-
-class SequenceDataPipe:
-    def __init__(
-        self,
-        feature_cols: list[str],
-        context_cols: list[str] | None = None,
-        seq_len: int = 8,
-        batch_size: int = 256,
-        model_type: str = "lstm",
-    ):
-        self.feature_cols = feature_cols
-        self.context_cols = context_cols or []
-        self.seq_len = seq_len
-        self.batch_size = batch_size
-        self.model_type = model_type
-        self.scaler = StandardScaler()
-        self._fitted = False
-
-        self.train_dl: DataLoader | None = None
-        self.valid_dl: DataLoader | None = None
-        self.test_dl: DataLoader | None = None
-        self.predict_dl: DataLoader | None = None
-
-    @property
-    def total_input_features(self) -> int:
-        return len(self.feature_cols) + len(self.context_cols)
-
-    def _scale_df(self, df: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
-        df = df.copy()
-        if fit:
-            df[self.feature_cols] = self.scaler.fit_transform(df[self.feature_cols])
-            self._fitted = True
-        else:
-            assert self._fitted, "Najpierw wywołaj prepare_data z danymi treningowymi."
-            df[self.feature_cols] = self.scaler.transform(df[self.feature_cols])
-        return df
-
-    def _collate(self, batch):
-        xs, ys = zip(*batch)
-        X = torch.stack(xs)
-        y = torch.cat(ys)
-        if self.model_type == "conv1d":
-            X = X.permute(0, 2, 1)
-        return X, y
-
-    def prepare_data(
-        self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series | pd.DataFrame,
-        X_valid: pd.DataFrame,
-        y_valid: pd.Series | pd.DataFrame,
-        X_test: pd.DataFrame,
-        y_test: pd.Series | pd.DataFrame,
-        X_predict: pd.DataFrame | None = None,
-    ):
-        def merge(X, y):
-            y_series = y["total_points"] if isinstance(y, pd.DataFrame) else y
-            y_series = y_series.copy()
-            y_series.name = "total_points"
-            return X.join(y_series)
-
-        train_df = self._scale_df(merge(X_train, y_train), fit=True)
-        valid_df = self._scale_df(merge(X_valid, y_valid), fit=False)
-        test_df = self._scale_df(merge(X_test, y_test), fit=False)
-
-        train_ds = SequenceDataset(
-            train_df,
-            self.feature_cols,
-            context_cols=self.context_cols,
-            seq_len=self.seq_len,
-        )
-        valid_ds = SequenceDataset(
-            valid_df,
-            self.feature_cols,
-            context_cols=self.context_cols,
-            seq_len=self.seq_len,
-            history_df=train_df,
-        )
-        full_hist_for_test = pd.concat([train_df, valid_df], ignore_index=True)
-        test_ds = SequenceDataset(
-            test_df,
-            self.feature_cols,
-            context_cols=self.context_cols,
-            seq_len=self.seq_len,
-            history_df=full_hist_for_test,
-        )
-
-        if X_predict is not None and not X_predict.empty:
-            predict_df = X_predict.copy()
-            predict_df["total_points"] = 0.0
-            predict_df = self._scale_df(predict_df, fit=False)
-            full_hist_for_pred = pd.concat([train_df, valid_df, test_df], ignore_index=True)
-            predict_ds = SequenceDataset(
-                predict_df,
-                self.feature_cols,
-                context_cols=self.context_cols,
-                seq_len=self.seq_len,
-                history_df=full_hist_for_pred,
-            )
-            self.predict_dl = DataLoader(
-                predict_ds,
-                batch_size=self.batch_size,
-                shuffle=False,
-                collate_fn=self._collate,
-            )
-        else:
-            self.predict_dl = None
-
-        print(
-            f"[SequenceDataPipe/{self.model_type}]  "
-            f"train={len(train_ds)}  valid={len(valid_ds)}  test={len(test_ds)}  "
-            f"seq_len={self.seq_len}  n_features={self.total_input_features}"
-        )
-
-        self.train_dl = DataLoader(
-            train_ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            collate_fn=self._collate,
-            drop_last=True,
-        )
-        self.valid_dl = DataLoader(
-            valid_ds,
-            batch_size=self.batch_size,
-            shuffle=False,
-            collate_fn=self._collate,
-        )
-        self.test_dl = DataLoader(
-            test_ds,
-            batch_size=self.batch_size,
-            shuffle=False,
-            collate_fn=self._collate,
-        )
-
-    def get_dataloaders(self):
-        return self.train_dl, self.valid_dl, self.test_dl
