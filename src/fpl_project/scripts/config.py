@@ -4,12 +4,12 @@ import scipy.stats as stats
 
 SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"]
 
-# Ziarno losowe i parametry walidacji krzyżowej
+# Random seed and cross-validation
 SEED = 77
 CV_SPLITS = 5
 N_ITER_SEARCH = 20
 
-# Siatki hiperparametrów dla modeli tabelarycznych (RandomizedSearchCV)
+# Hyperparameter search spaces for tabular models (RandomizedSearchCV)
 GLM_PARAM_GRID = {
     "alpha": stats.loguniform(1e-5, 0.01),
     "l1_ratio": stats.uniform(loc=0.0, scale=1.0),
@@ -29,19 +29,19 @@ XGB_PARAM_GRID = {
     "reg_lambda": stats.uniform(0.5, 3.0),
 }
 
-# Stałe funkcji straty FPLLoss i progów cenowych
+# FPLLoss constants and price-tier quantiles
 PRICE_QUANTILE_LOW = 0.50
 PRICE_QUANTILE_HIGH = 0.955
 EPS_MIN = 0.1
 W_MID = 1.25
 W_PREMIUM = 2.0
 
-# Zakres obcinania predykcji i regularyzacja meta-modelu
+# Prediction clipping range and meta-model regularisation
 PRED_CLIP_MIN = 0.0
 PRED_CLIP_MAX = 15.0
 META_RIDGE_ALPHA = 10.0
 
-# Hiperparametry sieci neuronowych (MLP, Conv1D)
+# Neural network hyperparameters (MLP, Conv1D)
 NN_BATCH_SIZE = 128
 NN_SEQ_LEN = 8
 NN_HIDDEN_SIZES = [128, 64]
@@ -74,7 +74,7 @@ FEATURES_ENGINEERING = DATA_DIR / "features_engineering.parquet"
 
 PREDS_GLM_META = DATA_DIR / "preds_glm_meta.parquet"
 
-# Ścieżki plików wynikowych w results/
+# Output files in results/
 METRICS_TEST_PATH = RESULTS_DIR / "metrics_test.csv"
 METRICS_VALID_PATH = RESULTS_DIR / "metrics_valid.csv"
 TABLE_TIERS_PATH = RESULTS_DIR / "table_tiers.csv"

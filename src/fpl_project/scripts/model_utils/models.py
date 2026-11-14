@@ -35,7 +35,7 @@ class MLP(nn.Module):
 
 
 class Conv1DRegressor(nn.Module):
-    """1D Convolutional regressor for sequential gameweek windows (bez połączeń resztkowych)."""
+    """1D Convolutional regressor for sequential gameweek windows (no residual connections)."""
 
     def __init__(
         self,

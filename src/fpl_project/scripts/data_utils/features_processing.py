@@ -77,7 +77,6 @@ class FeatureEngineer:
         df = self.df.copy()
         df = sort_data(df)
 
-        # EMA
         if isinstance(window_size, int):
             df_ema, ema_cols = self.ema(window_size=window_size)
         else:
@@ -91,7 +90,6 @@ class FeatureEngineer:
 
             df_ema = pd.concat(ema_frames, axis=1)
 
-        # LAG
         if isinstance(lag_size, int):
             df_lag, lag_cols = self.lag(lag_size=lag_size)
         else:
@@ -105,7 +103,6 @@ class FeatureEngineer:
 
             df_lag = pd.concat(lag_frames, axis=1)
 
-        # STD
         if isinstance(std_size, int):
             df_std, std_cols = self.rolling_std(window_size=std_size)
         else:
