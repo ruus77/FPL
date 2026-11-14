@@ -124,7 +124,8 @@ class FeatureEngineer:
 
         out = pd.concat([df[pre_game_cols], df_ema, df_lag, df_std], axis=1)
         num_cols = out.select_dtypes(include="number").columns
-        out[num_cols] = out[num_cols].fillna(out[num_cols].median()).fillna(0)
+        played = out["is_played"].astype(bool)
+        out[num_cols] = out[num_cols].fillna(out.loc[played, num_cols].median()).fillna(0)
         return out
 
 
@@ -147,7 +148,14 @@ def build_and_save_features_engineering_data() -> pd.DataFrame:
     feature_eng = FeatureEngineer(df=data)
     data_lag = feature_eng.features_integration(lag_size=[1, 3, 5], window_size=[3, 5], std_size=[3, 5])
 
-    corr_matrix = data_lag.drop(columns=["total_points"], errors="ignore").select_dtypes(include=np.number).corr().abs()
+    played = data_lag["is_played"].astype(bool)
+    corr_matrix = (
+        data_lag.loc[played]
+        .drop(columns=["total_points"], errors="ignore")
+        .select_dtypes(include=np.number)
+        .corr()
+        .abs()
+    )
     upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
     cols_to_drop = [col for col in upper_tri.columns if (upper_tri[col] > 0.9).any()]
     if cols_to_drop:

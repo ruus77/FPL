@@ -216,6 +216,28 @@ class FetchFCI(FetchData):
         ps[cols] = per_gw.fillna(ps[cols]).clip(lower=0).round(2)
         return ps
 
+    def _append_next_gameweek(self, playerstats: pd.DataFrame, matches: pd.DataFrame) -> pd.DataFrame:
+        """Add rows for the next not-yet-played gameweek, which playerstats.csv does not contain yet.
+
+        FCI publishes playerstats only for gameweeks that have already started, so upcoming fixtures
+        would never reach the dataset. The rows of the last known gameweek are copied (market columns
+        such as price and ownership are carried over) and every match statistic is set to NaN:
+        features of a row use only previous gameweeks (shift(1)), so these values are never read.
+        """
+        last_gw = int(playerstats["gw"].max())
+        unplayed = matches["home_score"].isna() & matches["away_score"].isna()
+        upcoming_gws = matches.loc[unplayed & (matches["gameweek"] > last_gw), "gameweek"]
+        if upcoming_gws.empty:
+            return playerstats
+
+        next_gw_rows = playerstats[playerstats["gw"] == last_gw].copy()
+        next_gw_rows["gw"] = int(upcoming_gws.min())
+        unknown_cols = self.config.FCI_CUMULATIVE_COLUMNS + [
+            "event_points", "transfers_in_event", "transfers_out_event",
+        ]
+        next_gw_rows[[c for c in unknown_cols if c in next_gw_rows.columns]] = np.nan
+        return pd.concat([playerstats, next_gw_rows], ignore_index=True)
+
     def _merge_and_clean(self) -> pd.DataFrame:
         players, matches = self._fetch_gameweeks()
         playerstats, teams_df = self._get_fci_base()
@@ -223,7 +245,7 @@ class FetchFCI(FetchData):
         if players.empty or matches.empty or playerstats.empty or teams_df.empty:
             return pd.DataFrame()
 
-        playerstats = self._decumulate_playerstats(playerstats)
+        playerstats = self._append_next_gameweek(self._decumulate_playerstats(playerstats), matches)
 
         players["name"] = players["first_name"] + " " + players["second_name"]
         players = players.drop(columns=["first_name", "second_name"])
@@ -483,7 +505,8 @@ class MergeData:
                 df[f"{col}_per_90"] = res.astype(float)
 
         num_cols = df.select_dtypes(include=np.number).columns
-        df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+        played = df["is_played"].astype(bool)
+        df[num_cols] = df[num_cols].fillna(df.loc[played, num_cols].median())
         df.columns = df.columns.str.lower()
         df["transfers_trend"] = (df.transfers_balance / df.selected).replace([np.inf, -np.inf], np.nan).fillna(0)
         df = df.sort_values(by=["code", "kickoff_time", "season", "gw"]).reset_index(drop=True)
