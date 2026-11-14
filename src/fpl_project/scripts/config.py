@@ -14,7 +14,6 @@ GLM_PARAM_GRID = {
     "alpha": stats.loguniform(1e-5, 0.01),
     "l1_ratio": stats.uniform(loc=0.0, scale=1.0),
     "family": ["poisson", "negative.binomial", "tweedie", "normal"],
-    "link": ["auto", "log"],
 }
 
 XGB_PARAM_GRID = {
@@ -36,9 +35,7 @@ EPS_MIN = 0.1
 W_MID = 1.25
 W_PREMIUM = 2.0
 
-# Prediction clipping range and meta-model regularisation
-PRED_CLIP_MIN = 0.0
-PRED_CLIP_MAX = 15.0
+# Meta-model regularisation
 META_RIDGE_ALPHA = 10.0
 
 # Neural network hyperparameters (MLP, Conv1D)

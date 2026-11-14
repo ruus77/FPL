@@ -218,7 +218,7 @@ class Trainer:
     def evaluate_dataloader(self, dataloader, model, loss_fn) -> dict[str, float]:
         return self.test_step(dataloader, model, loss_fn).to_dict()
 
-    def predict_dataloader(self, dataloader, model, clip_preds: bool = True) -> np.ndarray:
+    def predict_dataloader(self, dataloader, model) -> np.ndarray:
         model.eval()
         preds_all = []
         with torch.no_grad():
@@ -227,10 +227,7 @@ class Trainer:
                 pred = model(X)
                 preds_all.append(pred.cpu())
         preds_tensor = torch.cat(preds_all)
-        preds_inv = self._inverse(preds_tensor).detach().cpu().numpy().flatten()
-        if clip_preds:
-            return np.clip(preds_inv, 0.0, 15.0)
-        return preds_inv
+        return self._inverse(preds_tensor).detach().cpu().numpy().flatten()
 
     @staticmethod
     def _record_epoch_history(

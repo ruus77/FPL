@@ -49,7 +49,7 @@ def _predict_with_network(
         model_type="mlp",
         scaler=bundle.target_scaler,
     )
-    return trainer.predict_dataloader(dataloader, model, clip_preds=True)
+    return trainer.predict_dataloader(dataloader, model)
 
 
 def _predict_tabular_and_mlp(
@@ -61,7 +61,7 @@ def _predict_tabular_and_mlp(
 ) -> dict[str, np.ndarray]:
     X_tab = data.tabular.preprocessor.transform(X_predict)
     preds = {
-        key: np.clip(model.predict(X_tab.to_numpy()), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
+        key: model.predict(X_tab.to_numpy())
         for key, model in tab_result.models.items()
     }
 

@@ -121,7 +121,6 @@ class ModelSelector:
         y_p = np.asarray(y_pred, dtype=np.float64)
         if not np.all(np.isfinite(y_p)):
             return -float("inf")
-        y_p = np.clip(y_p, 0.0, 15.0)
         err_sq = (np.asarray(y_true, dtype=np.float64) - y_p) ** 2
         if sample_weight is not None:
             w = np.asarray(sample_weight, dtype=np.float64)

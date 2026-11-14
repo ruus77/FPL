@@ -92,16 +92,8 @@ def tune_tabular_models(data: PreparedData, device: str) -> TabularTuningResult:
             fitted_models[f"{m_name}_{variant}"] = fitted_model
             print(f"  [{m_name.upper()} - {variant}] Najlepsze parametry: {row_cv['best_params']}")
 
-            preds_valid[f"{m_name}_{variant}"] = np.clip(
-                fitted_model.predict(data.tabular.X_valid.to_numpy()),
-                config.PRED_CLIP_MIN,
-                config.PRED_CLIP_MAX,
-            )
-            preds_test[f"{m_name}_{variant}"] = np.clip(
-                fitted_model.predict(data.tabular.X_test.to_numpy()),
-                config.PRED_CLIP_MIN,
-                config.PRED_CLIP_MAX,
-            )
+            preds_valid[f"{m_name}_{variant}"] = fitted_model.predict(data.tabular.X_valid.to_numpy())
+            preds_test[f"{m_name}_{variant}"] = fitted_model.predict(data.tabular.X_test.to_numpy())
 
     return TabularTuningResult(
         predictions=PredictionSplit(valid=preds_valid, test=preds_test),

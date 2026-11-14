@@ -166,8 +166,8 @@ def fit_meta_models(
 
         meta_nnls = LinearRegression(positive=True, fit_intercept=True)
         meta_nnls.fit(X_meta_val, y_val, sample_weight=sw_val)
-        p_val_nnls = np.clip(meta_nnls.predict(X_meta_val), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
-        p_tst_nnls = np.clip(meta_nnls.predict(X_meta_tst), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
+        p_val_nnls = meta_nnls.predict(X_meta_val)
+        p_tst_nnls = meta_nnls.predict(X_meta_tst)
         valid_df[f"meta_nnls_{variant}"] = p_val_nnls
         test_df[f"meta_nnls_{variant}"] = p_tst_nnls
         _append_meta_weights(
@@ -180,16 +180,16 @@ def fit_meta_models(
 
         meta_ctx = Ridge(alpha=config.META_RIDGE_ALPHA, positive=True, fit_intercept=True, random_state=config.SEED)
         meta_ctx.fit(X_ctx_val, y_val, sample_weight=sw_val)
-        p_val_ctx = np.clip(meta_ctx.predict(X_ctx_val), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
-        p_tst_ctx = np.clip(meta_ctx.predict(X_ctx_tst), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
+        p_val_ctx = meta_ctx.predict(X_ctx_val)
+        p_tst_ctx = meta_ctx.predict(X_ctx_tst)
         valid_df[f"meta_context_{variant}"] = p_val_ctx
         test_df[f"meta_context_{variant}"] = p_tst_ctx
         _append_meta_weights(
             meta_weights_rows, "meta_context", variant, meta_ctx.intercept_, list(X_ctx_val.columns), meta_ctx.coef_
         )
 
-        p_val_avg = np.clip(X_meta_val.mean(axis=1).to_numpy(dtype=np.float64), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
-        p_tst_avg = np.clip(X_meta_tst.mean(axis=1).to_numpy(dtype=np.float64), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
+        p_val_avg = X_meta_val.mean(axis=1).to_numpy(dtype=np.float64)
+        p_tst_avg = X_meta_tst.mean(axis=1).to_numpy(dtype=np.float64)
         valid_df[f"mean_ensemble_{variant}"] = p_val_avg
         test_df[f"mean_ensemble_{variant}"] = p_tst_avg
 

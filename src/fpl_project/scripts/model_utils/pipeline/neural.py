@@ -114,10 +114,10 @@ def train_neural_networks(data: PreparedData, device: str) -> NNTrainingResult:
             )
 
             preds_valid[key] = trainer.predict_dataloader(
-                bundle.valid_dl, model_nn, clip_preds=True
+                bundle.valid_dl, model_nn
             )
             preds_test[key] = trainer.predict_dataloader(
-                bundle.test_dl, model_nn, clip_preds=True
+                bundle.test_dl, model_nn
             )
             histories[key] = history
             trained_models[key] = model_nn
