@@ -63,5 +63,5 @@ odds for its fixtures are published.
 
 ## Notes
 
-- Code and comments are in English; plot titles and labels in the notebooks are in Polish
-  (thesis figures), as is `results/README.md`.
+- Code, comments and `results/README.md` are in English; plot titles and labels in the notebooks
+  are in Polish (thesis figures).
