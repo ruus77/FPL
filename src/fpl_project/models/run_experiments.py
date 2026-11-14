@@ -129,6 +129,15 @@ class TabularTuningResult:
 
 
 @dataclass(frozen=True)
+class NNTrainingResult:
+    """Predictions, training histories, and hyperparameters from neural network training."""
+
+    predictions: PredictionSplit
+    histories: dict[str, dict[str, list[float]]]
+    nn_params: dict[str, dict]
+
+
+@dataclass(frozen=True)
 class MergedPredictions:
     """Aligned validation and test DataFrames containing all base model predictions."""
 
@@ -864,13 +873,16 @@ def _create_loss_and_monitor(variant: str, weights: FPLWeightConfig) -> tuple[nn
     return loss_fn, "loss"
 
 
-def train_neural_networks(data: PreparedData, device: str) -> PredictionSplit:
+def train_neural_networks(data: PreparedData, device: str) -> NNTrainingResult:
     """Train MLP and Conv1D in MSE and FPLLoss variants with chronological early stopping."""
     preds_valid: dict[str, np.ndarray] = {}
     preds_test: dict[str, np.ndarray] = {}
+    histories: dict[str, dict[str, list[float]]] = {}
+    nn_params: dict[str, dict] = {}
 
     for bundle in [data.mlp_bundle, data.conv_bundle]:
         for variant in ["mse", "fplloss"]:
+            key = f"{bundle.name}_{variant}"
             print("\n" + "=" * 90)
             print(f"TRENING SIECI NEURONOWEJ: {bundle.name.upper()} — WARIANT: {variant.upper()} (seed={config.SEED})")
             print("=" * 90)
@@ -924,14 +936,36 @@ def train_neural_networks(data: PreparedData, device: str) -> PredictionSplit:
                 f"ES_val MSE={es_metrics['mse']:.4f}, Loss={es_metrics['loss']:.4f}, AdjR2={es_metrics['adj_r2']:.4f}"
             )
 
-            preds_valid[f"{bundle.name}_{variant}"] = trainer.predict_dataloader(
+            preds_valid[key] = trainer.predict_dataloader(
                 bundle.valid_dl, model_nn, clip_preds=True
             )
-            preds_test[f"{bundle.name}_{variant}"] = trainer.predict_dataloader(
+            preds_test[key] = trainer.predict_dataloader(
                 bundle.test_dl, model_nn, clip_preds=True
             )
+            histories[key] = history
+            arch_info = (
+                {"hidden_sizes": str(config.NN_HIDDEN_SIZES)}
+                if bundle.name == "mlp"
+                else {
+                    "channels": str(config.NN_CONV_CHANNELS),
+                    "kernel_size": config.NN_KERNEL_SIZE,
+                    "seq_len": config.NN_SEQ_LEN,
+                }
+            )
+            nn_params[key] = {
+                **arch_info,
+                "dropout": config.NN_DROPOUT,
+                "lr": config.NN_LR,
+                "weight_decay": config.NN_WEIGHT_DECAY,
+                "batch_size": config.NN_BATCH_SIZE,
+                "epochs_ran": epochs_ran,
+            }
 
-    return PredictionSplit(valid=preds_valid, test=preds_test)
+    return NNTrainingResult(
+        predictions=PredictionSplit(valid=preds_valid, test=preds_test),
+        histories=histories,
+        nn_params=nn_params,
+    )
 
 
 def merge_base_predictions(
@@ -1230,6 +1264,7 @@ def build_table_tiers(df_metrics_test: pd.DataFrame) -> pd.DataFrame:
 def log_results_to_mlflow(
     eval_result: MetaEvaluationResult,
     best_params_log: dict[str, dict],
+    nn_result: NNTrainingResult,
     data: PreparedData,
     artifact_paths: list[Path],
 ) -> None:
@@ -1255,6 +1290,7 @@ def log_results_to_mlflow(
         variant = str(row_t["variant"])
         level = str(row_t["level"])
         run_name = f"{m_name}_{variant}_{level}"
+        model_key = f"{m_name}_{variant}"
 
         with tracker.start_run(run_name=run_name):
             mlflow.set_tag("model", m_name)
@@ -1273,16 +1309,36 @@ def log_results_to_mlflow(
                 "w_mid": config.W_MID,
                 "w_premium": config.W_PREMIUM,
             }
-            if f"{m_name}_{variant}" in best_params_log:
-                for k, v in best_params_log[f"{m_name}_{variant}"].items():
+            if model_key in best_params_log:
+                for k, v in best_params_log[model_key].items():
                     params[f"hp_{k}"] = v
+            if model_key in nn_result.nn_params:
+                for k, v in nn_result.nn_params[model_key].items():
+                    params[f"nn_{k}"] = v
             tracker.log_params(params)
+
+            if model_key in nn_result.histories:
+                hist = nn_result.histories[model_key]
+                for ep in range(len(hist["train_loss"])):
+                    tracker.log_metrics(
+                        {
+                            "train_loss": float(hist["train_loss"][ep]),
+                            "es_val_loss": float(hist["test_loss"][ep]),
+                            "train_mse": float(hist["train_mse"][ep]),
+                            "es_val_mse": float(hist["test_mse"][ep]),
+                            "train_mae": float(hist["train_mae"][ep]),
+                            "es_val_mae": float(hist["test_mae"][ep]),
+                        },
+                        step=ep,
+                    )
 
             metrics_to_log = {}
             for mc in metric_cols:
                 clean_mc = mc.replace("@", "_")
                 metrics_to_log[f"valid_{clean_mc}"] = float(row_v[mc])
                 metrics_to_log[f"test_{clean_mc}"] = float(row_t[mc])
+            if model_key in nn_result.nn_params:
+                metrics_to_log["n_epochs_trained"] = float(nn_result.nn_params[model_key]["epochs_ran"])
             tracker.log_metrics(metrics_to_log)
 
             if idx == len(df_metrics_test) - 1:
@@ -1405,6 +1461,7 @@ def save_results(
     merged: MergedPredictions,
     eval_result: MetaEvaluationResult,
     best_params_log: dict[str, dict],
+    nn_result: NNTrainingResult,
 ) -> None:
     """Save all result CSV/Parquet files, update results/README.md, and log to MLflow."""
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1436,6 +1493,7 @@ def save_results(
     log_results_to_mlflow(
         eval_result=eval_result,
         best_params_log=best_params_log,
+        nn_result=nn_result,
         data=data,
         artifact_paths=[
             config.METRICS_TEST_PATH,
@@ -1473,11 +1531,11 @@ def main() -> None:
 
     data = load_data()
     tab_result = tune_tabular_models(data, device)
-    nn_preds = train_neural_networks(data, device)
+    nn_result = train_neural_networks(data, device)
 
     combined_preds = PredictionSplit(
-        valid={**tab_result.predictions.valid, **nn_preds.valid},
-        test={**tab_result.predictions.test, **nn_preds.test},
+        valid={**tab_result.predictions.valid, **nn_result.predictions.valid},
+        test={**tab_result.predictions.test, **nn_result.predictions.test},
     )
 
     merged = merge_base_predictions(data, combined_preds)
@@ -1487,6 +1545,7 @@ def main() -> None:
         merged=merged,
         eval_result=eval_result,
         best_params_log=tab_result.best_params,
+        nn_result=nn_result,
     )
     print(f"Czas całkowity wykonania eksperymentu: {time.time() - total_start:.2f} s")
 

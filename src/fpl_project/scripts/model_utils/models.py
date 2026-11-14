@@ -60,7 +60,7 @@ class MLP(nn.Module):
 
 
 class Conv1DRegressor(nn.Module):
-    """Residual 1D Convolutional regressor for sequential gameweek windows."""
+    """1D Convolutional regressor for sequential gameweek windows (bez połączeń resztkowych)."""
 
     def __init__(
         self,
@@ -81,16 +81,8 @@ class Conv1DRegressor(nn.Module):
             nn.LeakyReLU(0.01),
         )
 
-        blocks = [
+        self.conv_blocks = nn.ModuleList([
             self._conv_block(channels[i], channels[i + 1], kernel_size, dropout)
-            for i in range(len(channels) - 1)
-        ]
-        self.conv_blocks = nn.ModuleList(blocks)
-
-        self.skips = nn.ModuleList([
-            nn.Conv1d(channels[i], channels[i + 1], kernel_size=1)
-            if channels[i] != channels[i + 1]
-            else nn.Identity()
             for i in range(len(channels) - 1)
         ])
 
@@ -117,53 +109,12 @@ class Conv1DRegressor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.input_proj(x.transpose(1, 2))
-        for block, skip in zip(self.conv_blocks, self.skips):
-            out = nn.functional.leaky_relu(block(out) + skip(out), negative_slope=0.01)
+        for block in self.conv_blocks:
+            out = nn.functional.leaky_relu(block(out), negative_slope=0.01)
         pooled = torch.cat([out[:, :, -1], out.mean(dim=-1), out.amax(dim=-1)], dim=1)
         return self.head(pooled)
 
 
-class LSTMRegressor(nn.Module):
-    """Stacked LSTM regressor for sequential gameweek windows."""
-
-    def __init__(
-        self,
-        n_features: int,
-        hidden_size: int = 128,
-        num_layers: int = 2,
-        dropout: float = 0.2,
-        bidirectional: bool = False,
-    ):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.bidirectional = bidirectional
-        self.directions = 2 if bidirectional else 1
-
-        self.input_proj = nn.Linear(n_features, hidden_size)
-        self.lstm = nn.LSTM(
-            input_size=hidden_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=bidirectional,
-        )
-
-        lstm_out_size = hidden_size * self.directions
-        self.head = nn.Sequential(
-            nn.LayerNorm(lstm_out_size),
-            nn.Linear(lstm_out_size, 64),
-            nn.LeakyReLU(0.01),
-            nn.Dropout(dropout),
-            nn.Linear(64, 1),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.input_proj(x)
-        _, (h_n, _) = self.lstm(x)
-        h_last = torch.cat([h_n[-2], h_n[-1]], dim=-1) if self.bidirectional else h_n[-1]
-        return self.head(h_last)
 
 
 class FPLLoss(nn.Module):
