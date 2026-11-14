@@ -21,6 +21,7 @@ from fpl_project.scripts.data_utils.features_processing import (
 from fpl_project.scripts.model_utils.data import (
     FPLDataPipe,
     SequenceDataPipe,
+    prepare_sequence_dataframe,
     scale_target,
     train_test_split,
 )
@@ -97,6 +98,7 @@ data = sort_data(pd.read_parquet(config.FEATURES_ENGINEERING))
 data.total_points = data.total_points.clip(lower=0)
 data_seq = sort_data(pd.read_parquet(config.EDA))
 data_seq.total_points = data_seq.total_points.clip(lower=0)
+data_seq, seq_feature_cols, seq_context_cols = prepare_sequence_dataframe(data_seq, cols_map)
 
 if "is_played" not in data.columns and "is_played" in data_seq.columns:
     data["is_played"] = data_seq["is_played"].values
@@ -110,24 +112,23 @@ data_splits_seq, target_scaler_seq = scale_target(data_splits_seq)
 num_cols = [c for c in data.columns if c not in cols_map.id_cols + cols_map.static_cols + cols_map.target]
 cat_cols = cols_map.static_cols
 
-seq_feature_cols = [
-    c for c in cols_map.fpl_cols + cols_map.match_context_cols + cols_map.market_cols + cols_map.betting_cols
-    if c in data_seq.columns and c != "total_points"
-]
-seq_feature_cols = list(dict.fromkeys(seq_feature_cols))
-
 fpl_pipe_mlp = FPLDataPipe(num_cols=num_cols, cat_cols=cat_cols, batch_size=hipers.batch_size)
 fpl_pipe_mlp.prepare_data(**data_splits)
 train_dl_mlp, valid_dl_mlp, test_dl_mlp = fpl_pipe_mlp.get_dataloaders()
 predict_dl_mlp = fpl_pipe_mlp.predict_dataloader
 
-seq_pipe = SequenceDataPipe(feature_cols=seq_feature_cols, seq_len=hipers.seq_len, batch_size=hipers.batch_size)
+seq_pipe = SequenceDataPipe(
+    feature_cols=seq_feature_cols,
+    context_cols=seq_context_cols,
+    seq_len=hipers.seq_len,
+    batch_size=hipers.batch_size,
+)
 seq_pipe.prepare_data(**data_splits_seq)
 train_dl_seq, valid_dl_seq, test_dl_seq = seq_pipe.get_dataloaders()
 predict_dl_seq = seq_pipe.predict_dl
 
 INPUT_SIZE_MLP = next(iter(train_dl_mlp))[0].shape[1]
-N_FEATURES_SEQ = len(seq_feature_cols)
+N_FEATURES_SEQ = seq_pipe.total_input_features
 
 print(
     f"[FPLDataPipe/mlp]  train={len(train_dl_mlp.dataset)}  "
@@ -138,13 +139,17 @@ print(
 
 def create_model_instance(model_name: str, dropout: float = 0.2) -> nn.Module:
     if model_name == "MLP":
-        return MLP(input_size=INPUT_SIZE_MLP, hidden_sizes=[32, 16], dropout=dropout).to(device)
+        return MLP(
+            input_size=INPUT_SIZE_MLP,
+            hidden_sizes=config.NN_HIDDEN_SIZES,
+            dropout=dropout,
+        ).to(device)
     elif model_name == "Conv1DRegressor":
         return Conv1DRegressor(
             n_features=N_FEATURES_SEQ,
             seq_len=hipers.seq_len,
-            channels=[32, 16],
-            kernel_size=3,
+            channels=config.NN_CONV_CHANNELS,
+            kernel_size=config.NN_KERNEL_SIZE,
             dropout=dropout,
         ).to(device)
     else:
@@ -368,9 +373,13 @@ def run_multi_seed_experiment(
 
         model_arch = {}
         if model_name == "MLP":
-            model_arch = {"hidden_sizes": [32, 16], "dropout": dropout}
+            model_arch = {"hidden_sizes": config.NN_HIDDEN_SIZES, "dropout": dropout}
         elif model_name == "Conv1DRegressor":
-            model_arch = {"channels": [32, 16], "kernel_size": 3, "dropout": dropout}
+            model_arch = {
+                "channels": config.NN_CONV_CHANNELS,
+                "kernel_size": config.NN_KERNEL_SIZE,
+                "dropout": dropout,
+            }
 
         params_to_log = {
             "model": model_name,
@@ -557,6 +566,16 @@ if __name__ == "__main__":
                     w_mid=config.W_MID,
                     w_premium=config.W_PREMIUM,
                     eps_min=config.EPS_MIN,
+                    minutes_mean=(
+                        float(mlp_num_scaler.mean_[mlp_minutes_num_idx]) / 90.0
+                        if setup.model_type == "mlp"
+                        else 0.0
+                    ),
+                    minutes_scale=(
+                        float(mlp_num_scaler.scale_[mlp_minutes_num_idx]) / 90.0
+                        if setup.model_type == "mlp"
+                        else 1.0
+                    ),
                 ),
                 {
                     "w_mid": config.W_MID,

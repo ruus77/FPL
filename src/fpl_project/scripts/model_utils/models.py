@@ -72,9 +72,14 @@ class Conv1DRegressor(nn.Module):
     ):
         super().__init__()
         if channels is None:
-            channels = [64, 128, 64]
+            channels = [128, 64]
 
-        self.input_proj = nn.Conv1d(n_features, channels[0], kernel_size=1)
+        self.seq_len = seq_len
+        self.input_proj = nn.Sequential(
+            nn.Conv1d(n_features, channels[0], kernel_size=1),
+            nn.BatchNorm1d(channels[0]),
+            nn.LeakyReLU(0.01),
+        )
 
         blocks = [
             self._conv_block(channels[i], channels[i + 1], kernel_size, dropout)
@@ -89,14 +94,13 @@ class Conv1DRegressor(nn.Module):
             for i in range(len(channels) - 1)
         ])
 
-        self.gap = nn.AdaptiveAvgPool1d(1)
+        pooled_dim = channels[-1] * 3
         self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(channels[-1], 32),
-            nn.LayerNorm(32),
+            nn.Linear(pooled_dim, 64),
+            nn.LayerNorm(64),
             nn.LeakyReLU(0.01),
             nn.Dropout(dropout),
-            nn.Linear(32, 1),
+            nn.Linear(64, 1),
         )
 
     @staticmethod
@@ -105,7 +109,7 @@ class Conv1DRegressor(nn.Module):
         return nn.Sequential(
             nn.Conv1d(in_ch, out_ch, kernel_size=ks, padding=pad),
             nn.BatchNorm1d(out_ch),
-            nn.GELU(),
+            nn.LeakyReLU(0.01),
             nn.Dropout(dr),
             nn.Conv1d(out_ch, out_ch, kernel_size=ks, padding=pad),
             nn.BatchNorm1d(out_ch),
@@ -114,8 +118,9 @@ class Conv1DRegressor(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.input_proj(x.transpose(1, 2))
         for block, skip in zip(self.conv_blocks, self.skips):
-            out = torch.relu(block(out) + skip(out))
-        return self.head(self.gap(out))
+            out = nn.functional.leaky_relu(block(out) + skip(out), negative_slope=0.01)
+        pooled = torch.cat([out[:, :, -1], out.mean(dim=-1), out.amax(dim=-1)], dim=1)
+        return self.head(pooled)
 
 
 class LSTMRegressor(nn.Module):
@@ -175,6 +180,8 @@ class FPLLoss(nn.Module):
         w_premium: float = config.W_PREMIUM,
         eps_min: float = config.EPS_MIN,
         use_ema_minutes: bool = False,
+        minutes_mean: float = 0.0,
+        minutes_scale: float = 1.0,
     ):
         super().__init__()
         if model_type not in ("mlp", "lstm", "conv1d"):
@@ -188,6 +195,8 @@ class FPLLoss(nn.Module):
         self.w_premium = w_premium
         self.eps_min = eps_min
         self.use_ema_minutes = use_ema_minutes
+        self.minutes_mean = minutes_mean
+        self.minutes_scale = minutes_scale
 
     def _get_feature(self, x: torch.Tensor, idx: int) -> torch.Tensor:
         if self.model_type == "mlp" or x.ndim == 2:
@@ -200,8 +209,10 @@ class FPLLoss(nn.Module):
             m = seq[:, 0]
             for t in range(1, seq.shape[1]):
                 m = 0.5 * seq[:, t] + 0.5 * m
-            return m
-        return self._get_feature(x, self.minutes_idx)
+        else:
+            m = self._get_feature(x, self.minutes_idx)
+        m = m * self.minutes_scale + self.minutes_mean
+        return torch.clamp(m, 0.0, 1.0)
 
     def forward(
         self,

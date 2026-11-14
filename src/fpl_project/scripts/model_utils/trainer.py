@@ -1,6 +1,8 @@
-import copy
-import random
 from collections import defaultdict
+import copy
+from dataclasses import dataclass
+import random
+
 import numpy as np
 import sklearn
 import torch
@@ -10,7 +12,7 @@ from tqdm.auto import tqdm
 from .custom_metrics import CustomMAE, CustomMSE
 
 
-def set_seed(seed: int = 77):
+def set_seed(seed: int = 77) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -20,7 +22,50 @@ def set_seed(seed: int = 77):
     torch.backends.cudnn.benchmark = False
 
 
+@dataclass(frozen=True)
+class EpochMetrics:
+    """Structured metrics computed over a single training or evaluation epoch."""
+
+    loss: float
+    mse: float
+    mae: float
+    adj_r2: float
+    mse_budget: float
+    mse_mid: float
+    mse_premium: float
+    mae_budget: float
+    mae_mid: float
+    mae_premium: float
+    predictions: torch.Tensor | None = None
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "loss": self.loss,
+            "mse": self.mse,
+            "mae": self.mae,
+            "adj_r2": self.adj_r2,
+            "mse@budget": self.mse_budget,
+            "mse@mid": self.mse_mid,
+            "mse@premium": self.mse_premium,
+            "mae@budget": self.mae_budget,
+            "mae@mid": self.mae_mid,
+            "mae@premium": self.mae_premium,
+        }
+
+    def get_monitored_value(self, monitor: str) -> float:
+        monitor_map = {
+            "loss": self.loss,
+            "mse": self.mse,
+            "mae": self.mae,
+            "adj_r2": self.adj_r2,
+        }
+        if monitor not in monitor_map:
+            raise ValueError(f"Nieznana metryka monitorowania: {monitor}")
+        return monitor_map[monitor]
+
+
 class Trainer:
+    """Trainer and evaluator for tabular and sequential PyTorch regression models."""
 
     def __init__(
         self,
@@ -31,13 +76,13 @@ class Trainer:
         p_high: float = 0.8,
         value_idx: int = 0,
         model_type: str = "mlp",
-        scaler: sklearn.preprocessing.StandardScaler = None,
+        scaler: sklearn.preprocessing.StandardScaler | None = None,
     ):
-
         set_seed(random_state)
 
         self.device = device
         self.num_features = num_features
+        self.scaler = scaler
 
         self.mse_at = CustomMSE(
             p_low=p_low,
@@ -54,46 +99,44 @@ class Trainer:
         ).to(device)
 
         self.r2_metric = R2Score().to(device)
-        self.scaler = scaler
 
-    def _adjusted_r2(self, r2, n_samples):
+    def _adjusted_r2(self, r2: float, n_samples: int) -> float:
         if n_samples <= self.num_features + 1:
             return 0.0
+        return 1.0 - ((1.0 - r2) * (n_samples - 1) / (n_samples - self.num_features - 1))
 
-        return 1 - (
-            (1 - r2) * (n_samples - 1) / (n_samples - self.num_features - 1)
-        )
-
-    def _inverse(self, x: torch.Tensor):
+    def _inverse(self, x: torch.Tensor) -> torch.Tensor:
         if self.scaler is None:
             return x
+        arr = x.detach().cpu().numpy()
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        inv = self.scaler.inverse_transform(arr)
+        return torch.tensor(inv, device=self.device)
 
-        x = x.detach().cpu().numpy()
-
-        if x.ndim == 1:
-            x = x.reshape(-1, 1)
-
-        x = self.scaler.inverse_transform(x)
-        return torch.tensor(x, device=self.device)
-
-    def set_model_config(self, value_idx: int, model_type: str):
+    def set_model_config(self, value_idx: int, model_type: str) -> None:
         self.mse_at.set_config(value_idx=value_idx, model_type=model_type)
         self.mae_at.set_config(value_idx=value_idx, model_type=model_type)
 
-    def _reset_metrics(self):
+    def _reset_metrics(self) -> None:
         self.mse_at.reset()
         self.mae_at.reset()
         self.r2_metric.reset()
 
-    def _update_metrics(self, y_pred, y_true, x):
-        y_pred = self._inverse(y_pred)
-        y_true = self._inverse(y_true)
+    def _update_metrics(self, y_pred: torch.Tensor, y_true: torch.Tensor, x: torch.Tensor) -> None:
+        y_pred_inv = self._inverse(y_pred)
+        y_true_inv = self._inverse(y_true)
 
-        self.mse_at(preds=y_pred, target=y_true, x=x)
-        self.mae_at(preds=y_pred, target=y_true, x=x)
-        self.r2_metric(y_pred.flatten(), y_true.flatten())
+        self.mse_at(preds=y_pred_inv, target=y_true_inv, x=x)
+        self.mae_at(preds=y_pred_inv, target=y_true_inv, x=x)
+        self.r2_metric(y_pred_inv.flatten(), y_true_inv.flatten())
 
-    def _compute_metrics(self, n_samples):
+    def _build_epoch_metrics(
+        self,
+        avg_loss: float,
+        n_samples: int,
+        predictions: torch.Tensor | None = None,
+    ) -> EpochMetrics:
         mse = self.mse_at.compute()
         mae = self.mae_at.compute()
         r2 = self.r2_metric.compute().item()
@@ -104,28 +147,30 @@ class Trainer:
         total_n_mae = (self.mae_at.n_b + self.mae_at.n_m + self.mae_at.n_p).clamp(min=1)
         overall_mae = ((self.mae_at.err_sum_b + self.mae_at.err_sum_m + self.mae_at.err_sum_p) / total_n_mae).item()
 
-        return (
-            overall_mse,
-            overall_mae,
-            mse["mse@budget"].item(),
-            mse["mse@mid"].item(),
-            mse["mse@premium"].item(),
-            mae["mae@budget"].item(),
-            mae["mae@mid"].item(),
-            mae["mae@premium"].item(),
-            self._adjusted_r2(r2, n_samples),
+        return EpochMetrics(
+            loss=avg_loss,
+            mse=overall_mse,
+            mae=overall_mae,
+            adj_r2=self._adjusted_r2(r2, n_samples),
+            mse_budget=mse["mse@budget"].item(),
+            mse_mid=mse["mse@mid"].item(),
+            mse_premium=mse["mse@premium"].item(),
+            mae_budget=mae["mae@budget"].item(),
+            mae_mid=mae["mae@mid"].item(),
+            mae_premium=mae["mae@premium"].item(),
+            predictions=predictions,
         )
 
     @staticmethod
-    def _unpack_batch(batch, device: str):
+    def _unpack_batch(batch, device: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if len(batch) == 3:
             X, y, aux = batch
             return X.to(device), y.to(device), aux.to(device)
         X, y = batch
-        X = X.to(device)
-        return X, y.to(device), X
+        X_dev = X.to(device)
+        return X_dev, y.to(device), X_dev
 
-    def train_step(self, dataloader, model, optimizer, loss_fn):
+    def train_step(self, dataloader, model, optimizer, loss_fn) -> EpochMetrics:
         model.train()
         self._reset_metrics()
         total_loss = 0.0
@@ -145,9 +190,9 @@ class Trainer:
             self._update_metrics(pred.detach(), y, aux)
 
         n_samples = max(n_seen, 1)
-        return total_loss / n_samples, *self._compute_metrics(n_samples)
+        return self._build_epoch_metrics(avg_loss=total_loss / n_samples, n_samples=n_samples)
 
-    def test_step(self, dataloader, model, loss_fn):
+    def test_step(self, dataloader, model, loss_fn) -> EpochMetrics:
         model.eval()
         self._reset_metrics()
         total_loss = 0.0
@@ -168,38 +213,14 @@ class Trainer:
                 preds_all.append(pred.cpu())
 
         n_samples = max(n_seen, 1)
-        return (
-            total_loss / n_samples,
-            *self._compute_metrics(n_samples),
-            torch.cat(preds_all),
+        return self._build_epoch_metrics(
+            avg_loss=total_loss / n_samples,
+            n_samples=n_samples,
+            predictions=torch.cat(preds_all),
         )
 
     def evaluate_dataloader(self, dataloader, model, loss_fn) -> dict[str, float]:
-        (
-            loss,
-            mse,
-            mae,
-            mse_b,
-            mse_m,
-            mse_p,
-            mae_b,
-            mae_m,
-            mae_p,
-            adj_r2,
-            _,
-        ) = self.test_step(dataloader, model, loss_fn)
-        return {
-            "loss": loss,
-            "mse": mse,
-            "mae": mae,
-            "adj_r2": adj_r2,
-            "mse@budget": mse_b,
-            "mse@mid": mse_m,
-            "mse@premium": mse_p,
-            "mae@budget": mae_b,
-            "mae@mid": mae_m,
-            "mae@premium": mae_p,
-        }
+        return self.test_step(dataloader, model, loss_fn).to_dict()
 
     def predict_dataloader(self, dataloader, model, clip_preds: bool = True) -> np.ndarray:
         model.eval()
@@ -215,6 +236,34 @@ class Trainer:
             return np.clip(preds_inv, 0.0, 15.0)
         return preds_inv
 
+    @staticmethod
+    def _record_epoch_history(
+        history: dict[str, list[float]],
+        prefix: str,
+        metrics: EpochMetrics,
+    ) -> None:
+        for key, value in metrics.to_dict().items():
+            history[f"{prefix}_{key}"].append(value)
+
+    @staticmethod
+    def _print_epoch_summary(
+        epoch: int,
+        current_lr: float,
+        train_metrics: EpochMetrics,
+        valid_metrics: EpochMetrics,
+    ) -> None:
+        print(
+            f"Epoch {epoch:4d} | Current LR: {current_lr:.6f}\n"
+            f"   Train  Loss={train_metrics.loss:.4f} | "
+            f"MSE@B={train_metrics.mse_budget:.4f} MSE@M={train_metrics.mse_mid:.4f} MSE@P={train_metrics.mse_premium:.4f} | "
+            f"MAE@B={train_metrics.mae_budget:.4f} MAE@M={train_metrics.mae_mid:.4f} MAE@P={train_metrics.mae_premium:.4f} | "
+            f"AdjR2={train_metrics.adj_r2:.4f}\n"
+            f"   Valid  Loss={valid_metrics.loss:.4f} | "
+            f"MSE@B={valid_metrics.mse_budget:.4f} MSE@M={valid_metrics.mse_mid:.4f} MSE@P={valid_metrics.mse_premium:.4f} | "
+            f"MAE@B={valid_metrics.mae_budget:.4f} MAE@M={valid_metrics.mae_mid:.4f} MAE@P={valid_metrics.mae_premium:.4f} | "
+            f"AdjR2={valid_metrics.adj_r2:.4f}"
+        )
+
     def model_eval(
         self,
         train_dataloader,
@@ -229,97 +278,30 @@ class Trainer:
         monitor: str = "mse",
         verbose: bool = True,
     ):
-
         best_state = copy.deepcopy(model.state_dict())
         mode = "max" if monitor == "adj_r2" else "min"
         best_metric = -float("inf") if mode == "max" else float("inf")
         counter = 0
-        results = defaultdict(list)
+        results: dict[str, list[float]] = defaultdict(list)
 
         for epoch in tqdm(range(num_epochs), desc=model.__class__.__name__, disable=not verbose):
+            train_metrics = self.train_step(train_dataloader, model, optimizer, loss_fn)
+            valid_metrics = self.test_step(test_dataloader, model, loss_fn)
 
-            (
-                tr_loss,
-                tr_mse,
-                tr_mae,
-                tr_mse_b,
-                tr_mse_m,
-                tr_mse_p,
-                tr_mae_b,
-                tr_mae_m,
-                tr_mae_p,
-                tr_adj_r2,
-            ) = self.train_step(train_dataloader, model, optimizer, loss_fn)
-
-            (
-                ts_loss,
-                ts_mse,
-                ts_mae,
-                ts_mse_b,
-                ts_mse_m,
-                ts_mse_p,
-                ts_mae_b,
-                ts_mae_m,
-                ts_mae_p,
-                ts_adj_r2,
-                _,
-            ) = self.test_step(test_dataloader, model, loss_fn)
-
-            monitor_map = {
-                "mse": ts_mse,
-                "mae": ts_mae,
-                "adj_r2": ts_adj_r2,
-                "loss": ts_loss,
-            }
-            if monitor not in monitor_map:
-                raise ValueError(f"Nieznana metryka monitorowania: {monitor}")
-            current_metric = monitor_map[monitor]
+            current_metric = valid_metrics.get_monitored_value(monitor)
 
             if scheduler is not None:
-                if isinstance(
-                    scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                ):
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.step(current_metric)
                 else:
                     scheduler.step()
 
-            results["train_loss"].append(tr_loss)
-            results["test_loss"].append(ts_loss)
-            results["train_mse"].append(tr_mse)
-            results["test_mse"].append(ts_mse)
-            results["train_mae"].append(tr_mae)
-            results["test_mae"].append(ts_mae)
-
-            results["train_mse@budget"].append(tr_mse_b)
-            results["test_mse@budget"].append(ts_mse_b)
-            results["train_mse@mid"].append(tr_mse_m)
-            results["test_mse@mid"].append(ts_mse_m)
-            results["train_mse@premium"].append(tr_mse_p)
-            results["test_mse@premium"].append(ts_mse_p)
-
-            results["train_mae@budget"].append(tr_mae_b)
-            results["test_mae@budget"].append(ts_mae_b)
-            results["train_mae@mid"].append(tr_mae_m)
-            results["test_mae@mid"].append(ts_mae_m)
-            results["train_mae@premium"].append(tr_mae_p)
-            results["test_mae@premium"].append(ts_mae_p)
-
-            results["train_adj_r2"].append(tr_adj_r2)
-            results["test_adj_r2"].append(ts_adj_r2)
+            self._record_epoch_history(results, "train", train_metrics)
+            self._record_epoch_history(results, "test", valid_metrics)
 
             if verbose and epoch % 10 == 0:
                 current_lr = optimizer.param_groups[0]["lr"]
-                print(
-                    f"Epoch {epoch:4d} | Current LR: {current_lr:.6f}\n"
-                    f"   Train  Loss={tr_loss:.4f} | "
-                    f"MSE@B={tr_mse_b:.4f} MSE@M={tr_mse_m:.4f} MSE@P={tr_mse_p:.4f} | "
-                    f"MAE@B={tr_mae_b:.4f} MAE@M={tr_mae_m:.4f} MAE@P={tr_mae_p:.4f} | "
-                    f"AdjR2={tr_adj_r2:.4f}\n"
-                    f"   Valid  Loss={ts_loss:.4f} | "
-                    f"MSE@B={ts_mse_b:.4f} MSE@M={ts_mse_m:.4f} MSE@P={ts_mse_p:.4f} | "
-                    f"MAE@B={ts_mae_b:.4f} MAE@M={ts_mae_m:.4f} MAE@P={ts_mae_p:.4f} | "
-                    f"AdjR2={ts_adj_r2:.4f}"
-                )
+                self._print_epoch_summary(epoch, current_lr, train_metrics, valid_metrics)
 
             improved = (
                 current_metric > best_metric + tolerance

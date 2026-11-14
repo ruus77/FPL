@@ -141,11 +141,8 @@ def build_and_save_features_engineering_data() -> pd.DataFrame:
     data[num_cols] = data[num_cols].astype(np.float64)
     data.columns = data.columns.str.lower()
 
-    data["transfers_trend"] = (data.transfers_balance / data.selected).replace([np.inf, -np.inf], np.nan).fillna(0)
-    data["player_match_xg_expected"] = data["xg_per_90"] * data["prob_win"] * data["prob_over_2.5"]
-    data["player_match_xa_expected"] = data["xa_per_90"] * data["prob_win"] * data["prob_over_2.5"]
-    data["match_value_efficiency"] = (data["prob_win"] + (0.5 * data["prob_draw"])) / data["value"]
-    data["hype_vs_odds_ratio"] = data["transfers_trend"] / (data["prob_win"] + 0.01)
+    if "transfers_trend" not in data.columns:
+        data["transfers_trend"] = (data.transfers_balance / data.selected).replace([np.inf, -np.inf], np.nan).fillna(0)
 
     feature_eng = FeatureEngineer(df=data)
     data_lag = feature_eng.features_integration(lag_size=[1, 3, 5], window_size=[3, 5], std_size=[3, 5])

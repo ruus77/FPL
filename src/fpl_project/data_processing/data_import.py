@@ -484,6 +484,8 @@ class MergeData:
 
         num_cols = df.select_dtypes(include=np.number).columns
         df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+        df.columns = df.columns.str.lower()
+        df["transfers_trend"] = (df.transfers_balance / df.selected).replace([np.inf, -np.inf], np.nan).fillna(0)
         df = df.sort_values(by=["code", "kickoff_time", "season", "gw"]).reset_index(drop=True)
 
         return df

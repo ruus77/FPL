@@ -1,9 +1,10 @@
 from datetime import datetime
-from pathlib import Path
 import sys
 import urllib.request
 import mlflow
 import mlflow.pytorch
+
+from fpl_project.scripts import config
 
 
 class MlflowTracker:
@@ -18,8 +19,7 @@ class MlflowTracker:
         try:
             urllib.request.urlopen(uri, timeout=1.5)
         except Exception:
-            root_dir = Path(__file__).resolve().parent.parent.parent.parent
-            db_path = (root_dir / "mlflow.db").as_posix()
+            db_path = (config.ROOT_DIR / "mlflow.db").as_posix()
             uri = f"sqlite:///{db_path}"
         mlflow.set_tracking_uri(uri)
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -26,10 +26,9 @@ class FeaturesConfig:
 
     ### LEAKAGE COLUMNS
     match_context_cols: list = field(default_factory=lambda: [
-        "starts", "minutes", "goals_scored", "assists", "own_goals", "clean_sheets", "goals_conceded", 
+        "minutes", "starts", "goals_scored", "assists", "own_goals", "clean_sheets", "goals_conceded", 
         "saves", "penalties_missed", "penalties_saved", "yellow_cards", "red_cards", "team_h_score", "team_a_score",
-        "xg", "xa", "xg_involvements", "xg_conceded", "xg_per_90", "xa_per_90", "xg_involvements_per_90", "xg_conceded_per_90",
-        "player_match_xg_expected", "player_match_xa_expected", "match_value_efficiency", "hype_vs_odds_ratio"
+        "xg", "xa", "xg_involvements", "xg_conceded", "xg_per_90", "xa_per_90", "xg_involvements_per_90", "xg_conceded_per_90"
     ])
 
     betting_cols: list = field(default_factory=lambda: [
@@ -38,7 +37,7 @@ class FeaturesConfig:
 
     @property
     def LEAKAGE_COLS(self) -> list:
-        return list(set(self.fpl_cols + self.match_context_cols + self.market_cols + self.target))
+        return list(dict.fromkeys(self.fpl_cols + self.market_cols + self.match_context_cols + self.target))
 
 
 

@@ -24,6 +24,7 @@ from fpl_project.scripts.data_utils.features_processing import (
 )
 from fpl_project.scripts.model_utils.data import (
     FPLDataPipe,
+    prepare_sequence_dataframe,
     scale_target,
     train_test_split,
 )
@@ -51,33 +52,97 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 
-@dataclass
-class PreparedData:
-    """Container for split datasets, weights, scalers, and dataloaders."""
+@dataclass(frozen=True)
+class RawSplits:
+    """Raw feature and target splits aligned across train, validation, and test sets."""
 
-    X_train_raw: pd.DataFrame
-    y_train_raw: pd.Series
-    X_valid_raw: pd.DataFrame
-    y_valid_raw: pd.Series
-    X_test_raw: pd.DataFrame
-    y_test_raw: pd.Series
-    X_train_tab: pd.DataFrame
-    X_valid_tab: pd.DataFrame
-    X_test_tab: pd.DataFrame
+    X_train: pd.DataFrame
+    y_train: pd.Series
+    X_valid: pd.DataFrame
+    y_valid: pd.Series
+    X_test: pd.DataFrame
+    y_test: pd.Series
+
+
+@dataclass(frozen=True)
+class FPLWeightConfig:
+    """Price thresholds and sample weights for FPLLoss across splits."""
+
     p_low: float
     p_high: float
     w_train: np.ndarray
     w_valid: np.ndarray
     w_test: np.ndarray
-    p_tabular: int
-    p_conv1d: int
+
+
+@dataclass(frozen=True)
+class TabularDataBundle:
+    """Preprocessed tabular feature matrices for GLM and XGBoost."""
+
+    X_train: pd.DataFrame
+    X_valid: pd.DataFrame
+    X_test: pd.DataFrame
+    n_features: int
+
+
+@dataclass(frozen=True)
+class NNDataBundle:
+    """Dataloaders, target scaler, and metadata for a single neural network architecture."""
+
+    name: str
+    n_features: int
+    train_dl: DataLoader
+    es_val_dl: DataLoader
+    valid_dl: DataLoader
+    test_dl: DataLoader
+    target_scaler: StandardScaler
     n_train_sub: int
     n_es_val: int
-    n_conv_warmup_dropped: int
-    mlp_dataloaders: tuple[DataLoader, DataLoader, DataLoader, DataLoader]
-    conv_dataloaders: tuple[DataLoader, DataLoader, DataLoader, DataLoader]
-    target_scaler_fe: StandardScaler
-    target_scaler_eda: StandardScaler
+    n_warmup_dropped: int = 0
+
+
+@dataclass(frozen=True)
+class PreparedData:
+    """Complete container of datasets, weights, and neural network bundles."""
+
+    raw: RawSplits
+    weights: FPLWeightConfig
+    tabular: TabularDataBundle
+    mlp_bundle: NNDataBundle
+    conv_bundle: NNDataBundle
+
+
+@dataclass(frozen=True)
+class PredictionSplit:
+    """Predictions dictionary for validation and test splits."""
+
+    valid: dict[str, np.ndarray]
+    test: dict[str, np.ndarray]
+
+
+@dataclass(frozen=True)
+class TabularTuningResult:
+    """Predictions and best hyperparameters from tabular RandomizedSearchCV."""
+
+    predictions: PredictionSplit
+    best_params: dict[str, dict]
+
+
+@dataclass(frozen=True)
+class MergedPredictions:
+    """Aligned validation and test DataFrames containing all base model predictions."""
+
+    valid_df: pd.DataFrame
+    test_df: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class MetaEvaluationResult:
+    """Evaluation tables for validation, test, and learned meta-model weights."""
+
+    metrics_valid: pd.DataFrame
+    metrics_test: pd.DataFrame
+    meta_weights: pd.DataFrame
 
 
 class MSELossWrapper(nn.Module):
@@ -103,6 +168,7 @@ class AuxSequenceDataset(Dataset):
         self,
         df: pd.DataFrame,
         feature_cols: list[str],
+        context_cols: list[str] | None = None,
         target_col: str = "total_points",
         seq_len: int = config.NN_SEQ_LEN,
         player_col: str = "code",
@@ -112,69 +178,137 @@ class AuxSequenceDataset(Dataset):
     ):
         self.seq_len = seq_len
         self.feature_cols = feature_cols
-        n_features = len(feature_cols)
+        self.context_cols = context_cols or []
+        n_hist = len(feature_cols)
 
         if history_df is not None and not history_df.empty:
-            df_indexed = df.copy()
-            df_indexed["_orig_pos"] = np.arange(len(df_indexed), dtype=np.int64)
-            df_indexed[target_col] = (
-                df_indexed[target_col].fillna(0.0) if target_col in df_indexed.columns else 0.0
+            self.sequences = self._build_with_history(
+                df=df,
+                history_df=history_df,
+                target_col=target_col,
+                seq_len=seq_len,
+                n_hist=n_hist,
+                player_col=player_col,
+                season_col=season_col,
+                time_col=time_col,
             )
-            df_sorted = df_indexed.sort_values([player_col, season_col, time_col]).reset_index(drop=True)
-
-            hist_sorted = history_df.copy().sort_values([player_col, season_col, time_col])
-            hist_sorted["_orig_pos"] = -1
-            if target_col not in hist_sorted.columns:
-                hist_sorted[target_col] = 0.0
-
-            hist_tails = {
-                player: grp.tail(seq_len)
-                for player, grp in hist_sorted.groupby(player_col, sort=False)
-            }
-
-            ordered_sequences: list[tuple[np.ndarray, float, np.ndarray] | None] = [None] * len(df_indexed)
-
-            for player, grp in df_sorted.groupby(player_col, sort=False):
-                hist_grp = hist_tails.get(player)
-                if hist_grp is not None and not hist_grp.empty:
-                    combined = pd.concat([hist_grp, grp], ignore_index=True)
-                    n_hist = len(hist_grp)
-                else:
-                    combined = grp.reset_index(drop=True)
-                    n_hist = 0
-
-                feats = combined[feature_cols].values.astype(np.float32)
-                target = combined[target_col].values.astype(np.float32)
-                raw_price = combined["_raw_price"].values.astype(np.float32)
-                raw_min = combined["_raw_min"].values.astype(np.float32)
-                orig_positions = combined["_orig_pos"].values
-
-                for t in range(n_hist, len(combined)):
-                    if t >= seq_len:
-                        window = feats[t - seq_len : t]
-                    elif t > 0:
-                        pad = np.zeros((seq_len - t, n_features), dtype=np.float32)
-                        window = np.vstack([pad, feats[:t]])
-                    else:
-                        window = np.zeros((seq_len, n_features), dtype=np.float32)
-
-                    aux = np.array([raw_price[t], raw_min[t]], dtype=np.float32)
-                    ordered_sequences[int(orig_positions[t])] = (window, float(target[t]), aux)
-
-            self.sequences = ordered_sequences
         else:
-            self.sequences = []
-            df_sorted = df.copy().sort_values([player_col, season_col, time_col]).reset_index(drop=True)
-            for _, grp in df_sorted.groupby([player_col, season_col], sort=False):
-                feats = grp[feature_cols].values.astype(np.float32)
-                target = grp[target_col].values.astype(np.float32)
-                raw_price = grp["_raw_price"].values.astype(np.float32)
-                raw_min = grp["_raw_min"].values.astype(np.float32)
+            self.sequences = self._build_without_history(
+                df=df,
+                target_col=target_col,
+                seq_len=seq_len,
+                player_col=player_col,
+                season_col=season_col,
+                time_col=time_col,
+            )
 
-                for t in range(seq_len, len(grp)):
-                    window = feats[t - seq_len : t]
-                    aux = np.array([raw_price[t], raw_min[t]], dtype=np.float32)
-                    self.sequences.append((window, float(target[t]), aux))
+    def _build_with_history(
+        self,
+        df: pd.DataFrame,
+        history_df: pd.DataFrame,
+        target_col: str,
+        seq_len: int,
+        n_hist: int,
+        player_col: str,
+        season_col: str,
+        time_col: str,
+    ) -> list[tuple[np.ndarray, float, np.ndarray]]:
+        df_indexed = df.copy()
+        df_indexed["_orig_pos"] = np.arange(len(df_indexed), dtype=np.int64)
+        df_indexed[target_col] = (
+            df_indexed[target_col].fillna(0.0) if target_col in df_indexed.columns else 0.0
+        )
+        df_sorted = df_indexed.sort_values([player_col, season_col, time_col]).reset_index(drop=True)
+
+        hist_sorted = history_df.copy().sort_values([player_col, season_col, time_col])
+        hist_sorted["_orig_pos"] = -1
+        if target_col not in hist_sorted.columns:
+            hist_sorted[target_col] = 0.0
+
+        hist_tails = {
+            player: grp.tail(seq_len)
+            for player, grp in hist_sorted.groupby(player_col, sort=False)
+        }
+
+        ordered_sequences: list[tuple[np.ndarray, float, np.ndarray] | None] = [None] * len(df_indexed)
+
+        for player, grp in df_sorted.groupby(player_col, sort=False):
+            hist_grp = hist_tails.get(player)
+            if hist_grp is not None and not hist_grp.empty:
+                combined = pd.concat([hist_grp, grp], ignore_index=True)
+                n_prefix = len(hist_grp)
+            else:
+                combined = grp.reset_index(drop=True)
+                n_prefix = 0
+
+            feats = combined[self.feature_cols].values.astype(np.float32)
+            ctx_feats = (
+                combined[self.context_cols].values.astype(np.float32)
+                if self.context_cols
+                else None
+            )
+            target = combined[target_col].values.astype(np.float32)
+            raw_price = combined["_raw_price"].values.astype(np.float32)
+            raw_min = combined["_raw_min"].values.astype(np.float32)
+            orig_positions = combined["_orig_pos"].values
+
+            for t in range(n_prefix, len(combined)):
+                hist_window = self._slice_or_pad(feats, t, seq_len, n_hist)
+                window = self._attach_context(hist_window, ctx_feats, t, seq_len)
+                aux = np.array([raw_price[t], raw_min[t]], dtype=np.float32)
+                ordered_sequences[int(orig_positions[t])] = (window, float(target[t]), aux)
+
+        return ordered_sequences  # type: ignore[return-value]
+
+    def _build_without_history(
+        self,
+        df: pd.DataFrame,
+        target_col: str,
+        seq_len: int,
+        player_col: str,
+        season_col: str,
+        time_col: str,
+    ) -> list[tuple[np.ndarray, float, np.ndarray]]:
+        sequences: list[tuple[np.ndarray, float, np.ndarray]] = []
+        df_sorted = df.copy().sort_values([player_col, season_col, time_col]).reset_index(drop=True)
+        for _, grp in df_sorted.groupby([player_col, season_col], sort=False):
+            feats = grp[self.feature_cols].values.astype(np.float32)
+            ctx_feats = (
+                grp[self.context_cols].values.astype(np.float32)
+                if self.context_cols
+                else None
+            )
+            target = grp[target_col].values.astype(np.float32)
+            raw_price = grp["_raw_price"].values.astype(np.float32)
+            raw_min = grp["_raw_min"].values.astype(np.float32)
+
+            for t in range(seq_len, len(grp)):
+                hist_window = feats[t - seq_len : t]
+                window = self._attach_context(hist_window, ctx_feats, t, seq_len)
+                aux = np.array([raw_price[t], raw_min[t]], dtype=np.float32)
+                sequences.append((window, float(target[t]), aux))
+        return sequences
+
+    @staticmethod
+    def _slice_or_pad(feats: np.ndarray, t: int, seq_len: int, n_hist: int) -> np.ndarray:
+        if t >= seq_len:
+            return feats[t - seq_len : t]
+        if t > 0:
+            pad = np.zeros((seq_len - t, n_hist), dtype=np.float32)
+            return np.vstack([pad, feats[:t]])
+        return np.zeros((seq_len, n_hist), dtype=np.float32)
+
+    @staticmethod
+    def _attach_context(
+        hist_window: np.ndarray,
+        ctx_feats: np.ndarray | None,
+        t: int,
+        seq_len: int,
+    ) -> np.ndarray:
+        if ctx_feats is None:
+            return hist_window
+        ctx_step = np.broadcast_to(ctx_feats[t], (seq_len, ctx_feats.shape[1])).astype(np.float32)
+        return np.hstack([hist_window, ctx_step])
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -194,13 +328,7 @@ def collate_conv1d_with_aux(batch):
     return torch.stack(xs), torch.cat(ys), torch.stack(auxs)
 
 
-def run_verification_tests() -> None:
-    """Verify FPLLoss weight equivalence and sample_weight routing in CV."""
-    print("=" * 90)
-    print("WERYFIKACJA POPRAWNOŚCI (TESTY JEDNOSTKOWE PRZED EKSPERYMENTEM)")
-    print("=" * 90)
-    set_seed(config.SEED)
-
+def _verify_fpl_loss_equivalence() -> None:
     toy_df = pd.DataFrame({
         "value_ema_3": [4.0, 4.5, 5.5, 7.0, 11.5],
         "minutes_ema_3": [0.0, 30.0, 60.0, 85.0, 90.0],
@@ -241,6 +369,8 @@ def run_verification_tests() -> None:
     assert np.isclose(expected_loss, torch_loss_w, atol=1e-6)
     print(f"[PASS] Test 1: compute_fpl_weights == FPLLoss (loss={expected_loss:.6f})")
 
+
+def _verify_cv_sample_weight_routing() -> None:
     rng = np.random.default_rng(config.SEED)
     X_toy = rng.normal(size=(120, 4))
     seasons_toy = np.repeat([2223, 2324, 2425], 40)
@@ -298,11 +428,20 @@ def run_verification_tests() -> None:
     )
     assert not np.allclose(map_u["glm_test"].predict(X_toy), map_w["glm_test"].predict(X_toy))
     print("[PASS] Test 2: sample_weight trafia do fit() oraz oceny foldu w TimeSeriesSplit CV")
+
+
+def run_verification_tests() -> None:
+    """Verify FPLLoss weight equivalence and sample_weight routing in CV."""
+    print("=" * 90)
+    print("WERYFIKACJA POPRAWNOŚCI (TESTY JEDNOSTKOWE PRZED EKSPERYMENTEM)")
+    print("=" * 90)
+    set_seed(config.SEED)
+    _verify_fpl_loss_equivalence()
+    _verify_cv_sample_weight_routing()
     print("=" * 90)
 
 
-def load_data() -> PreparedData:
-    """Load, align, split, and scale tabular and sequential datasets."""
+def _load_and_align_raw_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
     if not config.EDA.exists():
         from fpl_project.data_processing.data_import import fetch_and_save_eda_data
         fetch_and_save_eda_data()
@@ -330,35 +469,26 @@ def load_data() -> PreparedData:
     fe_aux["_raw_price"] = fe_aux["value_ema_3"].astype(np.float64)
     fe_aux["_raw_min"] = np.clip(fe_aux["minutes_ema_3"].astype(np.float64) / 90.0, 0.0, 1.0)
     df_eda_merged = pd.merge(
-        df_eda_raw, fe_aux[key_cols + ["_raw_price", "_raw_min"]], on=key_cols, how="inner"
+        df_eda_raw,
+        fe_aux[key_cols + ["_raw_price", "_raw_min"]],
+        on=key_cols,
+        how="inner",
     )
 
     df_fe = df_fe_raw.sort_values(["season", "gw", "code"]).reset_index(drop=True)
     df_eda = df_eda_merged.sort_values(["season", "gw", "code"]).reset_index(drop=True)
     assert (df_fe[key_cols].values == df_eda[key_cols].values).all()
+    return df_fe, df_eda
 
-    splits_fe = train_test_split(df_fe)
-    splits_eda = train_test_split(df_eda)
 
-    X_train_raw = splits_fe["X_train"].reset_index(drop=True)
-    y_train_raw = splits_fe["y_train"].reset_index(drop=True)
-    X_valid_raw = splits_fe["X_valid"].reset_index(drop=True)
-    y_valid_raw = splits_fe["y_valid"].reset_index(drop=True)
-    X_test_raw = splits_fe["X_test"].reset_index(drop=True)
-    y_test_raw = splits_fe["y_test"].reset_index(drop=True)
-
-    print(
-        f"Rozmiary podziału: train={len(X_train_raw)} (sezony 22/23-24/25), "
-        f"valid={len(X_valid_raw)} (sezon 25/26), test={len(X_test_raw)} (rozegrane 26/27)"
-    )
-
-    price_train_raw = X_train_raw["value_ema_3"].to_numpy(dtype=np.float64)
+def _compute_fpl_weight_config(raw_splits: RawSplits) -> FPLWeightConfig:
+    price_train_raw = raw_splits.X_train["value_ema_3"].to_numpy(dtype=np.float64)
     p_low = float(np.quantile(price_train_raw, config.PRICE_QUANTILE_LOW))
     p_high = float(np.quantile(price_train_raw, config.PRICE_QUANTILE_HIGH))
 
-    w_train = compute_fpl_weights(X_train_raw, p_low=p_low, p_high=p_high)
-    w_valid = compute_fpl_weights(X_valid_raw, p_low=p_low, p_high=p_high)
-    w_test = compute_fpl_weights(X_test_raw, p_low=p_low, p_high=p_high)
+    w_train = compute_fpl_weights(raw_splits.X_train, p_low=p_low, p_high=p_high)
+    w_valid = compute_fpl_weights(raw_splits.X_valid, p_low=p_low, p_high=p_high)
+    w_test = compute_fpl_weights(raw_splits.X_test, p_low=p_low, p_high=p_high)
 
     print("=" * 90)
     print("PARAMETRY FPLLoss (wyliczone na surowych kolumnach train):")
@@ -368,171 +498,249 @@ def load_data() -> PreparedData:
     print(f"  Wagi w_train: mean={w_train.mean():.4f}, min={w_train.min():.4f}, max={w_train.max():.4f}")
     print("=" * 90)
 
-    cols_map = FeaturesConfig()
+    return FPLWeightConfig(
+        p_low=p_low,
+        p_high=p_high,
+        w_train=w_train,
+        w_valid=w_valid,
+        w_test=w_test,
+    )
+
+
+def _build_tabular_bundle(
+    df_fe: pd.DataFrame,
+    raw_splits: RawSplits,
+    cols_map: FeaturesConfig,
+) -> TabularDataBundle:
     num_cols = [
         c for c in df_fe.columns if c not in cols_map.id_cols + cols_map.static_cols + cols_map.target
     ]
     cat_cols = cols_map.static_cols
 
     tab_pipe = FPLDataPipe(num_cols=num_cols, cat_cols=cat_cols, batch_size=config.NN_BATCH_SIZE)
-    X_train_tab = tab_pipe.preprocessor.fit_transform(X_train_raw)
-    X_valid_tab = tab_pipe.preprocessor.transform(X_valid_raw)
-    X_test_tab = tab_pipe.preprocessor.transform(X_test_raw)
-    p_tabular = int(X_train_tab.shape[1])
+    X_train_tab = tab_pipe.preprocessor.fit_transform(raw_splits.X_train)
+    X_valid_tab = tab_pipe.preprocessor.transform(raw_splits.X_valid)
+    X_test_tab = tab_pipe.preprocessor.transform(raw_splits.X_test)
 
-    es_mask_fe = (X_train_raw["season"] == config.NN_ES_SEASON) & (X_train_raw["gw"] >= config.NN_ES_MIN_GW)
-    sub_mask_fe = ~es_mask_fe
+    return TabularDataBundle(
+        X_train=X_train_tab,
+        X_valid=X_valid_tab,
+        X_test=X_test_tab,
+        n_features=int(X_train_tab.shape[1]),
+    )
+
+
+def _make_aux_tensor(df_part: pd.DataFrame) -> torch.Tensor:
+    p_col = df_part["value_ema_3"].to_numpy(dtype=np.float32)
+    m_col = np.clip(df_part["minutes_ema_3"].to_numpy(dtype=np.float32) / 90.0, 0.0, 1.0)
+    return torch.tensor(np.column_stack([p_col, m_col]), dtype=torch.float32)
+
+
+def _build_mlp_bundle(
+    splits_fe: dict[str, pd.DataFrame | pd.Series],
+    raw_splits: RawSplits,
+    tabular: TabularDataBundle,
+) -> NNDataBundle:
+    es_mask = (
+        (raw_splits.X_train["season"] == config.NN_ES_SEASON)
+        & (raw_splits.X_train["gw"] >= config.NN_ES_MIN_GW)
+    )
+    sub_mask = ~es_mask
 
     splits_fe_scaled, target_scaler_fe = scale_target(splits_fe)
     y_train_scaled = splits_fe_scaled["y_train"].reset_index(drop=True)
     y_valid_scaled = splits_fe_scaled["y_valid"].reset_index(drop=True)
     y_test_scaled = splits_fe_scaled["y_test"].reset_index(drop=True)
 
-    def make_aux_tensor(df_part: pd.DataFrame) -> torch.Tensor:
-        p_col = df_part["value_ema_3"].to_numpy(dtype=np.float32)
-        m_col = np.clip(df_part["minutes_ema_3"].to_numpy(dtype=np.float32) / 90.0, 0.0, 1.0)
-        return torch.tensor(np.column_stack([p_col, m_col]), dtype=torch.float32)
-
-    mlp_dataloaders = (
-        DataLoader(
-            TensorDataset(
-                torch.tensor(X_train_tab.loc[sub_mask_fe].to_numpy(), dtype=torch.float32),
-                torch.tensor(y_train_scaled.loc[sub_mask_fe].to_numpy().reshape(-1, 1), dtype=torch.float32),
-                make_aux_tensor(X_train_raw.loc[sub_mask_fe]),
-            ),
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
+    train_generator = torch.Generator().manual_seed(config.SEED)
+    train_dl = DataLoader(
+        TensorDataset(
+            torch.tensor(tabular.X_train.loc[sub_mask].to_numpy(), dtype=torch.float32),
+            torch.tensor(y_train_scaled.loc[sub_mask].to_numpy().reshape(-1, 1), dtype=torch.float32),
+            _make_aux_tensor(raw_splits.X_train.loc[sub_mask]),
         ),
-        DataLoader(
-            TensorDataset(
-                torch.tensor(X_train_tab.loc[es_mask_fe].to_numpy(), dtype=torch.float32),
-                torch.tensor(y_train_scaled.loc[es_mask_fe].to_numpy().reshape(-1, 1), dtype=torch.float32),
-                make_aux_tensor(X_train_raw.loc[es_mask_fe]),
-            ),
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=True,
+        generator=train_generator,
+    )
+    es_val_dl = DataLoader(
+        TensorDataset(
+            torch.tensor(tabular.X_train.loc[es_mask].to_numpy(), dtype=torch.float32),
+            torch.tensor(y_train_scaled.loc[es_mask].to_numpy().reshape(-1, 1), dtype=torch.float32),
+            _make_aux_tensor(raw_splits.X_train.loc[es_mask]),
         ),
-        DataLoader(
-            TensorDataset(
-                torch.tensor(X_valid_tab.to_numpy(), dtype=torch.float32),
-                torch.tensor(y_valid_scaled.to_numpy().reshape(-1, 1), dtype=torch.float32),
-                make_aux_tensor(X_valid_raw),
-            ),
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
+    )
+    valid_dl = DataLoader(
+        TensorDataset(
+            torch.tensor(tabular.X_valid.to_numpy(), dtype=torch.float32),
+            torch.tensor(y_valid_scaled.to_numpy().reshape(-1, 1), dtype=torch.float32),
+            _make_aux_tensor(raw_splits.X_valid),
         ),
-        DataLoader(
-            TensorDataset(
-                torch.tensor(X_test_tab.to_numpy(), dtype=torch.float32),
-                torch.tensor(y_test_scaled.to_numpy().reshape(-1, 1), dtype=torch.float32),
-                make_aux_tensor(X_test_raw),
-            ),
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
+    )
+    test_dl = DataLoader(
+        TensorDataset(
+            torch.tensor(tabular.X_test.to_numpy(), dtype=torch.float32),
+            torch.tensor(y_test_scaled.to_numpy().reshape(-1, 1), dtype=torch.float32),
+            _make_aux_tensor(raw_splits.X_test),
         ),
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
     )
 
-    seq_feature_cols = list(dict.fromkeys([
-        c
-        for c in cols_map.fpl_cols + cols_map.match_context_cols + cols_map.market_cols + cols_map.betting_cols
-        if c in df_eda.columns and c != "total_points"
-    ]))
-    p_conv1d = len(seq_feature_cols)
+    return NNDataBundle(
+        name="mlp",
+        n_features=tabular.n_features,
+        train_dl=train_dl,
+        es_val_dl=es_val_dl,
+        valid_dl=valid_dl,
+        test_dl=test_dl,
+        target_scaler=target_scaler_fe,
+        n_train_sub=int(sub_mask.sum()),
+        n_es_val=int(es_mask.sum()),
+    )
 
+
+def _merge_xy_dataframe(X_df: pd.DataFrame, y_ser: pd.Series) -> pd.DataFrame:
+    out_df = X_df.copy().reset_index(drop=True)
+    out_df["total_points"] = y_ser.to_numpy(dtype=np.float32)
+    return out_df
+
+
+def _build_conv1d_bundle(
+    df_eda: pd.DataFrame,
+    cols_map: FeaturesConfig,
+) -> NNDataBundle:
+    df_eda_seq, seq_feature_cols, context_cols = prepare_sequence_dataframe(df_eda, cols_map)
+    p_conv1d = len(seq_feature_cols) + len(context_cols)
+
+    splits_eda = train_test_split(df_eda_seq)
     splits_eda_scaled, target_scaler_eda = scale_target(splits_eda)
 
-    def merge_eda_xy(X_df: pd.DataFrame, y_ser: pd.Series) -> pd.DataFrame:
-        out_df = X_df.copy().reset_index(drop=True)
-        out_df["total_points"] = y_ser.to_numpy(dtype=np.float32)
-        return out_df
-
-    eda_train_df = merge_eda_xy(splits_eda_scaled["X_train"], splits_eda_scaled["y_train"])
-    eda_valid_df = merge_eda_xy(splits_eda_scaled["X_valid"], splits_eda_scaled["y_valid"])
-    eda_test_df = merge_eda_xy(splits_eda_scaled["X_test"], splits_eda_scaled["y_test"])
+    eda_train_df = _merge_xy_dataframe(splits_eda_scaled["X_train"], splits_eda_scaled["y_train"])
+    eda_valid_df = _merge_xy_dataframe(splits_eda_scaled["X_valid"], splits_eda_scaled["y_valid"])
+    eda_test_df = _merge_xy_dataframe(splits_eda_scaled["X_test"], splits_eda_scaled["y_test"])
 
     seq_scaler = StandardScaler()
     eda_train_df[seq_feature_cols] = seq_scaler.fit_transform(eda_train_df[seq_feature_cols])
     eda_valid_df[seq_feature_cols] = seq_scaler.transform(eda_valid_df[seq_feature_cols])
     eda_test_df[seq_feature_cols] = seq_scaler.transform(eda_test_df[seq_feature_cols])
 
-    es_mask_eda = (eda_train_df["season"] == config.NN_ES_SEASON) & (eda_train_df["gw"] >= config.NN_ES_MIN_GW)
+    es_mask_eda = (
+        (eda_train_df["season"] == config.NN_ES_SEASON)
+        & (eda_train_df["gw"] >= config.NN_ES_MIN_GW)
+    )
     eda_train_sub_df = eda_train_df.loc[~es_mask_eda].reset_index(drop=True)
     eda_es_val_df = eda_train_df.loc[es_mask_eda].reset_index(drop=True)
 
-    conv_train_sub_ds = AuxSequenceDataset(eda_train_sub_df, seq_feature_cols, seq_len=config.NN_SEQ_LEN)
+    conv_train_sub_ds = AuxSequenceDataset(
+        eda_train_sub_df,
+        feature_cols=seq_feature_cols,
+        context_cols=context_cols,
+        seq_len=config.NN_SEQ_LEN,
+    )
     conv_es_val_ds = AuxSequenceDataset(
-        eda_es_val_df, seq_feature_cols, seq_len=config.NN_SEQ_LEN, history_df=eda_train_sub_df
+        eda_es_val_df,
+        feature_cols=seq_feature_cols,
+        context_cols=context_cols,
+        seq_len=config.NN_SEQ_LEN,
+        history_df=eda_train_sub_df,
     )
     conv_valid_ds = AuxSequenceDataset(
-        eda_valid_df, seq_feature_cols, seq_len=config.NN_SEQ_LEN, history_df=eda_train_df
+        eda_valid_df,
+        feature_cols=seq_feature_cols,
+        context_cols=context_cols,
+        seq_len=config.NN_SEQ_LEN,
+        history_df=eda_train_df,
     )
     conv_test_ds = AuxSequenceDataset(
         eda_test_df,
-        seq_feature_cols,
+        feature_cols=seq_feature_cols,
+        context_cols=context_cols,
         seq_len=config.NN_SEQ_LEN,
         history_df=pd.concat([eda_train_df, eda_valid_df], ignore_index=True),
     )
 
-    conv_dataloaders = (
-        DataLoader(
-            conv_train_sub_ds,
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
-            collate_fn=collate_conv1d_with_aux,
-            drop_last=True,
-        ),
-        DataLoader(
-            conv_es_val_ds,
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
-            collate_fn=collate_conv1d_with_aux,
-        ),
-        DataLoader(
-            conv_valid_ds,
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
-            collate_fn=collate_conv1d_with_aux,
-        ),
-        DataLoader(
-            conv_test_ds,
-            batch_size=config.NN_BATCH_SIZE,
-            shuffle=False,
-            collate_fn=collate_conv1d_with_aux,
-        ),
+    train_generator = torch.Generator().manual_seed(config.SEED)
+    train_dl = DataLoader(
+        conv_train_sub_ds,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=True,
+        generator=train_generator,
+        collate_fn=collate_conv1d_with_aux,
+        drop_last=True,
     )
+    es_val_dl = DataLoader(
+        conv_es_val_ds,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_conv1d_with_aux,
+    )
+    valid_dl = DataLoader(
+        conv_valid_ds,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_conv1d_with_aux,
+    )
+    test_dl = DataLoader(
+        conv_test_ds,
+        batch_size=config.NN_BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_conv1d_with_aux,
+    )
+
+    return NNDataBundle(
+        name="conv1d",
+        n_features=p_conv1d,
+        train_dl=train_dl,
+        es_val_dl=es_val_dl,
+        valid_dl=valid_dl,
+        test_dl=test_dl,
+        target_scaler=target_scaler_eda,
+        n_train_sub=len(eda_train_sub_df),
+        n_es_val=len(eda_es_val_df),
+        n_warmup_dropped=len(eda_train_sub_df) - len(conv_train_sub_ds),
+    )
+
+
+def load_data() -> PreparedData:
+    """Load, align, split, and scale tabular and sequential datasets."""
+    df_fe, df_eda = _load_and_align_raw_dataframes()
+    splits_fe = train_test_split(df_fe)
+
+    raw_splits = RawSplits(
+        X_train=splits_fe["X_train"].reset_index(drop=True),
+        y_train=splits_fe["y_train"].reset_index(drop=True),
+        X_valid=splits_fe["X_valid"].reset_index(drop=True),
+        y_valid=splits_fe["y_valid"].reset_index(drop=True),
+        X_test=splits_fe["X_test"].reset_index(drop=True),
+        y_test=splits_fe["y_test"].reset_index(drop=True),
+    )
+
+    print(
+        f"Rozmiary podziału: train={len(raw_splits.X_train)} (sezony 22/23-24/25), "
+        f"valid={len(raw_splits.X_valid)} (sezon 25/26), test={len(raw_splits.X_test)} (rozegrane 26/27)"
+    )
+
+    weights = _compute_fpl_weight_config(raw_splits)
+    cols_map = FeaturesConfig()
+    tabular = _build_tabular_bundle(df_fe, raw_splits, cols_map)
+    mlp_bundle = _build_mlp_bundle(splits_fe, raw_splits, tabular)
+    conv_bundle = _build_conv1d_bundle(df_eda, cols_map)
 
     return PreparedData(
-        X_train_raw=X_train_raw,
-        y_train_raw=y_train_raw,
-        X_valid_raw=X_valid_raw,
-        y_valid_raw=y_valid_raw,
-        X_test_raw=X_test_raw,
-        y_test_raw=y_test_raw,
-        X_train_tab=X_train_tab,
-        X_valid_tab=X_valid_tab,
-        X_test_tab=X_test_tab,
-        p_low=p_low,
-        p_high=p_high,
-        w_train=w_train,
-        w_valid=w_valid,
-        w_test=w_test,
-        p_tabular=p_tabular,
-        p_conv1d=p_conv1d,
-        n_train_sub=int(sub_mask_fe.sum()),
-        n_es_val=int(es_mask_fe.sum()),
-        n_conv_warmup_dropped=len(eda_train_sub_df) - len(conv_train_sub_ds),
-        mlp_dataloaders=mlp_dataloaders,
-        conv_dataloaders=conv_dataloaders,
-        target_scaler_fe=target_scaler_fe,
-        target_scaler_eda=target_scaler_eda,
+        raw=raw_splits,
+        weights=weights,
+        tabular=tabular,
+        mlp_bundle=mlp_bundle,
+        conv_bundle=conv_bundle,
     )
 
 
-def tune_tabular_models(
-    data: PreparedData,
-    device: str,
-) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, dict]]:
-    """Tune and fit GLM and XGBoost in MSE and FPLLoss variants using TimeSeriesSplit CV."""
+def _print_glum_defaults() -> None:
     nb_default = get_family("negative.binomial")
     tw_default = get_family("tweedie")
     auto_links = {
@@ -545,30 +753,35 @@ def tune_tabular_models(
     print(f'  family="tweedie"           (bez parametru) -> power = {float(tw_default.power):.1f} ({type(tw_default).__name__})')
     print(
         '  link="auto" dla rodzin                     -> '
-        + ", ".join(f'{k}: {v}' for k, v in auto_links.items())
+        + ", ".join(f"{k}: {v}" for k, v in auto_links.items())
     )
     print("=" * 90)
 
+
+def tune_tabular_models(data: PreparedData, device: str) -> TabularTuningResult:
+    """Tune and fit GLM and XGBoost in MSE and FPLLoss variants using TimeSeriesSplit CV."""
+    _print_glum_defaults()
+
     cv_splits = make_gw_time_series_splits(
-        seasons=data.X_train_raw["season"],
-        gws=data.X_train_raw["gw"],
+        seasons=data.raw.X_train["season"],
+        gws=data.raw.X_train["gw"],
         n_splits=config.CV_SPLITS,
     )
 
-    val_idx_tab = list(data.X_train_tab.columns).index("num__value_ema_3")
+    val_idx_tab = list(data.tabular.X_train.columns).index("num__value_ema_3")
     selector = ModelSelector(
-        p_low=data.p_low,
-        p_high=data.p_high,
+        p_low=data.weights.p_low,
+        p_high=data.weights.p_high,
         value_idx=val_idx_tab,
         random_state=config.SEED,
     )
-    price_train_raw = data.X_train_raw["value_ema_3"].to_numpy(dtype=np.float64)
+    price_train_raw = data.raw.X_train["value_ema_3"].to_numpy(dtype=np.float64)
 
     preds_valid: dict[str, np.ndarray] = {}
     preds_test: dict[str, np.ndarray] = {}
     best_params_log: dict[str, dict] = {}
 
-    for variant, sw_train in [("mse", None), ("fplloss", data.w_train)]:
+    for variant, sw_train in [("mse", None), ("fplloss", data.weights.w_train)]:
         print("\n" + "=" * 90)
         print(f"STROJENIE I TRENING MODELI TABELARYCZNYCH (GLM, XGBOOST) — WARIANT: {variant.upper()}")
         print("=" * 90)
@@ -587,8 +800,8 @@ def tune_tabular_models(
             models=[glm_est, xgb_est],
             models_names=["glm", "xgboost"],
             params_grid=[config.GLM_PARAM_GRID, config.XGB_PARAM_GRID],
-            X_train=data.X_train_tab,
-            y_train=data.y_train_raw,
+            X_train=data.tabular.X_train,
+            y_train=data.raw.y_train,
             cv=config.CV_SPLITS,
             n_iter=config.N_ITER_SEARCH,
             sample_weight=sw_train,
@@ -603,83 +816,84 @@ def tune_tabular_models(
             print(f"  [{m_name.upper()} - {variant}] Najlepsze parametry: {row_cv['best_params']}")
 
             preds_valid[f"{m_name}_{variant}"] = np.clip(
-                fitted_model.predict(data.X_valid_tab.to_numpy()),
+                fitted_model.predict(data.tabular.X_valid.to_numpy()),
                 config.PRED_CLIP_MIN,
                 config.PRED_CLIP_MAX,
             )
             preds_test[f"{m_name}_{variant}"] = np.clip(
-                fitted_model.predict(data.X_test_tab.to_numpy()),
+                fitted_model.predict(data.tabular.X_test.to_numpy()),
                 config.PRED_CLIP_MIN,
                 config.PRED_CLIP_MAX,
             )
 
-    return preds_valid, preds_test, best_params_log
+    return TabularTuningResult(
+        predictions=PredictionSplit(valid=preds_valid, test=preds_test),
+        best_params=best_params_log,
+    )
 
 
-def train_neural_networks(
-    data: PreparedData,
-    device: str,
-) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    """Train MLP and Conv1D in MSE and FPLLoss variants with internal chronological early stopping."""
+def _instantiate_neural_model(bundle: NNDataBundle, device: str) -> nn.Module:
+    if bundle.name == "mlp":
+        return MLP(
+            input_size=bundle.n_features,
+            hidden_sizes=config.NN_HIDDEN_SIZES,
+            dropout=config.NN_DROPOUT,
+        ).to(device)
+    return Conv1DRegressor(
+        n_features=bundle.n_features,
+        seq_len=config.NN_SEQ_LEN,
+        channels=config.NN_CONV_CHANNELS,
+        kernel_size=config.NN_KERNEL_SIZE,
+        dropout=config.NN_DROPOUT,
+    ).to(device)
+
+
+def _create_loss_and_monitor(variant: str, weights: FPLWeightConfig) -> tuple[nn.Module, str]:
+    if variant == "mse":
+        return MSELossWrapper(), "mse"
+    loss_fn = FPLLoss(
+        p_low=weights.p_low,
+        p_high=weights.p_high,
+        value_idx=0,
+        minutes_idx=1,
+        model_type="mlp",
+        w_mid=config.W_MID,
+        w_premium=config.W_PREMIUM,
+        eps_min=config.EPS_MIN,
+    )
+    return loss_fn, "loss"
+
+
+def train_neural_networks(data: PreparedData, device: str) -> PredictionSplit:
+    """Train MLP and Conv1D in MSE and FPLLoss variants with chronological early stopping."""
     preds_valid: dict[str, np.ndarray] = {}
     preds_test: dict[str, np.ndarray] = {}
 
-    nn_configs = [
-        ("mlp", data.p_tabular, *data.mlp_dataloaders, data.target_scaler_fe),
-        ("conv1d", data.p_conv1d, *data.conv_dataloaders, data.target_scaler_eda),
-    ]
-
-    for nn_name, n_feat, tr_dl, es_dl, val_dl, tst_dl, t_scaler in nn_configs:
+    for bundle in [data.mlp_bundle, data.conv_bundle]:
         for variant in ["mse", "fplloss"]:
             print("\n" + "=" * 90)
-            print(f"TRENING SIECI NEURONOWEJ: {nn_name.upper()} — WARIANT: {variant.upper()} (seed={config.SEED})")
+            print(f"TRENING SIECI NEURONOWEJ: {bundle.name.upper()} — WARIANT: {variant.upper()} (seed={config.SEED})")
             print("=" * 90)
             set_seed(config.SEED)
 
-            if nn_name == "mlp":
-                model_nn = MLP(
-                    input_size=n_feat,
-                    hidden_sizes=config.NN_HIDDEN_SIZES,
-                    dropout=config.NN_DROPOUT,
-                ).to(device)
-            else:
-                model_nn = Conv1DRegressor(
-                    n_features=n_feat,
-                    seq_len=config.NN_SEQ_LEN,
-                    channels=config.NN_CONV_CHANNELS,
-                    kernel_size=config.NN_KERNEL_SIZE,
-                    dropout=config.NN_DROPOUT,
-                ).to(device)
-
-            if variant == "mse":
-                loss_fn = MSELossWrapper()
-                monitor_metric = "mse"
-            else:
-                loss_fn = FPLLoss(
-                    p_low=data.p_low,
-                    p_high=data.p_high,
-                    value_idx=0,
-                    minutes_idx=1,
-                    model_type="mlp",
-                    w_mid=config.W_MID,
-                    w_premium=config.W_PREMIUM,
-                    eps_min=config.EPS_MIN,
-                )
-                monitor_metric = "loss"
+            model_nn = _instantiate_neural_model(bundle, device)
+            loss_fn, monitor_metric = _create_loss_and_monitor(variant, data.weights)
 
             trainer = Trainer(
                 device=device,
-                num_features=n_feat,
+                num_features=bundle.n_features,
                 random_state=config.SEED,
-                p_low=data.p_low,
-                p_high=data.p_high,
+                p_low=data.weights.p_low,
+                p_high=data.weights.p_high,
                 value_idx=0,
                 model_type="mlp",
-                scaler=t_scaler,
+                scaler=bundle.target_scaler,
             )
 
             optimizer = torch.optim.AdamW(
-                model_nn.parameters(), lr=config.NN_LR, weight_decay=config.NN_WEIGHT_DECAY
+                model_nn.parameters(),
+                lr=config.NN_LR,
+                weight_decay=config.NN_WEIGHT_DECAY,
             )
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer,
@@ -691,8 +905,8 @@ def train_neural_networks(
             )
 
             history, best_state = trainer.model_eval(
-                train_dataloader=tr_dl,
-                test_dataloader=es_dl,
+                train_dataloader=bundle.train_dl,
+                test_dataloader=bundle.es_val_dl,
                 model=model_nn,
                 optimizer=optimizer,
                 loss_fn=loss_fn,
@@ -704,57 +918,60 @@ def train_neural_networks(
             )
             epochs_ran = len(history["train_loss"])
             model_nn.load_state_dict(best_state)
-            es_metrics = trainer.evaluate_dataloader(es_dl, model_nn, loss_fn)
+            es_metrics = trainer.evaluate_dataloader(bundle.es_val_dl, model_nn, loss_fn)
             print(
-                f"  [{nn_name.upper()} - {variant}] Zatrzymano po {epochs_ran} epokach | "
+                f"  [{bundle.name.upper()} - {variant}] Zatrzymano po {epochs_ran} epokach | "
                 f"ES_val MSE={es_metrics['mse']:.4f}, Loss={es_metrics['loss']:.4f}, AdjR2={es_metrics['adj_r2']:.4f}"
             )
 
-            preds_valid[f"{nn_name}_{variant}"] = trainer.predict_dataloader(val_dl, model_nn, clip_preds=True)
-            preds_test[f"{nn_name}_{variant}"] = trainer.predict_dataloader(tst_dl, model_nn, clip_preds=True)
+            preds_valid[f"{bundle.name}_{variant}"] = trainer.predict_dataloader(
+                bundle.valid_dl, model_nn, clip_preds=True
+            )
+            preds_test[f"{bundle.name}_{variant}"] = trainer.predict_dataloader(
+                bundle.test_dl, model_nn, clip_preds=True
+            )
 
-    return preds_valid, preds_test
+    return PredictionSplit(valid=preds_valid, test=preds_test)
 
 
 def merge_base_predictions(
     data: PreparedData,
-    preds_valid: dict[str, np.ndarray],
-    preds_test: dict[str, np.ndarray],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    predictions: PredictionSplit,
+) -> MergedPredictions:
     """Inner-join predictions of all base models by (code, season, gw)."""
     id_cols = [
         "code", "name", "position", "team", "opponent_team",
         "was_home", "season", "gw", "value_ema_3", "minutes_ema_3",
     ]
-    valid_df = data.X_valid_raw[id_cols].copy()
-    valid_df["y"] = data.y_valid_raw.to_numpy(dtype=np.float64)
+    valid_df = data.raw.X_valid[id_cols].copy()
+    valid_df["y"] = data.raw.y_valid.to_numpy(dtype=np.float64)
 
-    test_df = data.X_test_raw[id_cols].copy()
-    test_df["y"] = data.y_test_raw.to_numpy(dtype=np.float64)
+    test_df = data.raw.X_test[id_cols].copy()
+    test_df["y"] = data.raw.y_test.to_numpy(dtype=np.float64)
 
-    for col_name, p_arr in preds_valid.items():
+    for col_name, p_arr in predictions.valid.items():
         part_df = pd.DataFrame({
-            "code": data.X_valid_raw["code"].values,
-            "season": data.X_valid_raw["season"].values,
-            "gw": data.X_valid_raw["gw"].values,
+            "code": data.raw.X_valid["code"].values,
+            "season": data.raw.X_valid["season"].values,
+            "gw": data.raw.X_valid["gw"].values,
             col_name: p_arr,
         })
         valid_df = pd.merge(valid_df, part_df, on=["code", "season", "gw"], how="inner")
 
-    for col_name, p_arr in preds_test.items():
+    for col_name, p_arr in predictions.test.items():
         part_df = pd.DataFrame({
-            "code": data.X_test_raw["code"].values,
-            "season": data.X_test_raw["season"].values,
-            "gw": data.X_test_raw["gw"].values,
+            "code": data.raw.X_test["code"].values,
+            "season": data.raw.X_test["season"].values,
+            "gw": data.raw.X_test["gw"].values,
             col_name: p_arr,
         })
         test_df = pd.merge(test_df, part_df, on=["code", "season", "gw"], how="inner")
 
     print(
-        f"Valid po inner join 4 modeli: {len(valid_df)} wierszy (wypadło: {len(data.X_valid_raw) - len(valid_df)}) | "
-        f"Test po inner join 4 modeli: {len(test_df)} wierszy (wypadło: {len(data.X_test_raw) - len(test_df)})"
+        f"Valid po inner join 4 modeli: {len(valid_df)} wierszy (wypadło: {len(data.raw.X_valid) - len(valid_df)}) | "
+        f"Test po inner join 4 modeli: {len(test_df)} wierszy (wypadło: {len(data.raw.X_test) - len(test_df)})"
     )
-    return valid_df, test_df
+    return MergedPredictions(valid_df=valid_df, test_df=test_df)
 
 
 def evaluate(
@@ -835,18 +1052,43 @@ def build_context_matrix(
     return pd.DataFrame(out, index=preds_df.index)
 
 
+def _append_meta_weights(
+    rows: list[dict],
+    meta_model_name: str,
+    variant: str,
+    intercept: float,
+    feature_names: list[str],
+    coefs: np.ndarray,
+) -> None:
+    rows.append({
+        "meta_model": meta_model_name,
+        "variant": variant,
+        "feature": "intercept",
+        "weight": float(intercept),
+    })
+    for feat_name, coef_val in zip(feature_names, coefs):
+        rows.append({
+            "meta_model": meta_model_name,
+            "variant": variant,
+            "feature": feat_name,
+            "weight": float(coef_val),
+        })
+
+
 def fit_meta_models(
     data: PreparedData,
-    valid_df: pd.DataFrame,
-    test_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    merged: MergedPredictions,
+) -> MetaEvaluationResult:
     """Fit meta-models on validation predictions and evaluate all models on valid and test sets."""
+    valid_df = merged.valid_df
+    test_df = merged.test_df
+
     base_models_order = ["glm", "xgboost", "mlp", "conv1d"]
     p_map_base = {
-        "glm": data.p_tabular,
-        "xgboost": data.p_tabular,
-        "mlp": data.p_tabular,
-        "conv1d": data.p_conv1d,
+        "glm": data.tabular.n_features,
+        "xgboost": data.tabular.n_features,
+        "mlp": data.mlp_bundle.n_features,
+        "conv1d": data.conv_bundle.n_features,
     }
 
     metrics_valid_rows: list[dict] = []
@@ -857,19 +1099,20 @@ def fit_meta_models(
     y_tst = test_df["y"].to_numpy(dtype=np.float64)
     price_val = valid_df["value_ema_3"].to_numpy(dtype=np.float64)
     price_tst = test_df["value_ema_3"].to_numpy(dtype=np.float64)
+    p_low, p_high = data.weights.p_low, data.weights.p_high
 
     for variant in ["mse", "fplloss"]:
         variant_cols = [f"{m}_{variant}" for m in base_models_order]
         best_val_criterion = float("inf")
-        best_single_name = None
-        best_single_col = None
+        best_single_name = base_models_order[0]
+        best_single_col = variant_cols[0]
 
         for m_name in base_models_order:
             col = f"{m_name}_{variant}"
             p_feat = p_map_base[m_name]
 
-            m_val = evaluate(y_val, valid_df[col].to_numpy(), price_val, data.w_valid, data.p_low, data.p_high, p_feat)
-            m_tst = evaluate(y_tst, test_df[col].to_numpy(), price_tst, data.w_test, data.p_low, data.p_high, p_feat)
+            m_val = evaluate(y_val, valid_df[col].to_numpy(), price_val, data.weights.w_valid, p_low, p_high, p_feat)
+            m_tst = evaluate(y_tst, test_df[col].to_numpy(), price_tst, data.weights.w_test, p_low, p_high, p_feat)
 
             metrics_valid_rows.append({"model": m_name, "variant": variant, "level": "base", **m_val})
             metrics_test_rows.append({"model": m_name, "variant": variant, "level": "base", **m_tst})
@@ -885,59 +1128,31 @@ def fit_meta_models(
         X_meta_tst = test_df[variant_cols].copy()
         X_meta_tst.columns = base_models_order
 
-        meta_nnls = LinearRegression(positive=True, fit_intercept=True)
-        if variant == "fplloss":
-            meta_nnls.fit(X_meta_val, y_val, sample_weight=data.w_valid)
-        else:
-            meta_nnls.fit(X_meta_val, y_val)
+        sw_val = data.weights.w_valid if variant == "fplloss" else None
 
+        meta_nnls = LinearRegression(positive=True, fit_intercept=True)
+        meta_nnls.fit(X_meta_val, y_val, sample_weight=sw_val)
         p_val_nnls = np.clip(meta_nnls.predict(X_meta_val), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
         p_tst_nnls = np.clip(meta_nnls.predict(X_meta_tst), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
         valid_df[f"meta_nnls_{variant}"] = p_val_nnls
         test_df[f"meta_nnls_{variant}"] = p_tst_nnls
+        _append_meta_weights(
+            meta_weights_rows, "meta_nnls", variant, meta_nnls.intercept_, base_models_order, meta_nnls.coef_
+        )
 
-        meta_weights_rows.append({
-            "meta_model": "meta_nnls",
-            "variant": variant,
-            "feature": "intercept",
-            "weight": float(meta_nnls.intercept_),
-        })
-        for feat_name, coef_val in zip(base_models_order, meta_nnls.coef_):
-            meta_weights_rows.append({
-                "meta_model": "meta_nnls",
-                "variant": variant,
-                "feature": feat_name,
-                "weight": float(coef_val),
-            })
-
-        X_ctx_val = build_context_matrix(X_meta_val, valid_df, base_models_order, data.p_low, data.p_high)
-        X_ctx_tst = build_context_matrix(X_meta_tst, test_df, base_models_order, data.p_low, data.p_high)
+        X_ctx_val = build_context_matrix(X_meta_val, valid_df, base_models_order, p_low, p_high)
+        X_ctx_tst = build_context_matrix(X_meta_tst, test_df, base_models_order, p_low, p_high)
         p_ctx = int(X_ctx_val.shape[1])
 
         meta_ctx = Ridge(alpha=config.META_RIDGE_ALPHA, positive=True, fit_intercept=True, random_state=config.SEED)
-        if variant == "fplloss":
-            meta_ctx.fit(X_ctx_val, y_val, sample_weight=data.w_valid)
-        else:
-            meta_ctx.fit(X_ctx_val, y_val)
-
+        meta_ctx.fit(X_ctx_val, y_val, sample_weight=sw_val)
         p_val_ctx = np.clip(meta_ctx.predict(X_ctx_val), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
         p_tst_ctx = np.clip(meta_ctx.predict(X_ctx_tst), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
         valid_df[f"meta_context_{variant}"] = p_val_ctx
         test_df[f"meta_context_{variant}"] = p_tst_ctx
-
-        meta_weights_rows.append({
-            "meta_model": "meta_context",
-            "variant": variant,
-            "feature": "intercept",
-            "weight": float(meta_ctx.intercept_),
-        })
-        for feat_name, coef_val in zip(X_ctx_val.columns, meta_ctx.coef_):
-            meta_weights_rows.append({
-                "meta_model": "meta_context",
-                "variant": variant,
-                "feature": feat_name,
-                "weight": float(coef_val),
-            })
+        _append_meta_weights(
+            meta_weights_rows, "meta_context", variant, meta_ctx.intercept_, list(X_ctx_val.columns), meta_ctx.coef_
+        )
 
         p_val_avg = np.clip(X_meta_val.mean(axis=1).to_numpy(dtype=np.float64), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
         p_tst_avg = np.clip(X_meta_tst.mean(axis=1).to_numpy(dtype=np.float64), config.PRED_CLIP_MIN, config.PRED_CLIP_MAX)
@@ -957,15 +1172,15 @@ def fit_meta_models(
         ]
 
         for m_label, pv, pt, p_cnt in meta_eval_items:
-            mv = evaluate(y_val, pv, price_val, data.w_valid, data.p_low, data.p_high, p_cnt)
-            mt = evaluate(y_tst, pt, price_tst, data.w_test, data.p_low, data.p_high, p_cnt)
+            mv = evaluate(y_val, pv, price_val, data.weights.w_valid, p_low, p_high, p_cnt)
+            mt = evaluate(y_tst, pt, price_tst, data.weights.w_test, p_low, p_high, p_cnt)
             metrics_valid_rows.append({"model": m_label, "variant": variant, "level": "meta", **mv})
             metrics_test_rows.append({"model": m_label, "variant": variant, "level": "meta", **mt})
 
-    return (
-        pd.DataFrame(metrics_valid_rows),
-        pd.DataFrame(metrics_test_rows),
-        pd.DataFrame(meta_weights_rows),
+    return MetaEvaluationResult(
+        metrics_valid=pd.DataFrame(metrics_valid_rows),
+        metrics_test=pd.DataFrame(metrics_test_rows),
+        meta_weights=pd.DataFrame(meta_weights_rows),
     )
 
 
@@ -1013,8 +1228,7 @@ def build_table_tiers(df_metrics_test: pd.DataFrame) -> pd.DataFrame:
 
 
 def log_results_to_mlflow(
-    df_metrics_valid: pd.DataFrame,
-    df_metrics_test: pd.DataFrame,
+    eval_result: MetaEvaluationResult,
     best_params_log: dict[str, dict],
     data: PreparedData,
     artifact_paths: list[Path],
@@ -1030,6 +1244,9 @@ def log_results_to_mlflow(
         "mse@budget", "mse@mid", "mse@premium",
         "mae@budget", "mae@mid", "mae@premium",
     ]
+
+    df_metrics_test = eval_result.metrics_test
+    df_metrics_valid = eval_result.metrics_valid
 
     for idx in range(len(df_metrics_test)):
         row_t = df_metrics_test.iloc[idx]
@@ -1050,8 +1267,8 @@ def log_results_to_mlflow(
                 "level": level,
                 "p_features": int(row_t["p"]),
                 "seed": config.SEED,
-                "p_low": data.p_low,
-                "p_high": data.p_high,
+                "p_low": data.weights.p_low,
+                "p_high": data.weights.p_high,
                 "eps_min": config.EPS_MIN,
                 "w_mid": config.W_MID,
                 "w_premium": config.W_PREMIUM,
@@ -1076,37 +1293,17 @@ def log_results_to_mlflow(
     print(f"[MLflow] Zalogowano {len(df_metrics_test)} przebiegów eksperymentalnych do MLflow.")
 
 
-def save_results(
+def _render_results_readme(
     data: PreparedData,
-    valid_df: pd.DataFrame,
-    test_df: pd.DataFrame,
-    df_metrics_valid: pd.DataFrame,
-    df_metrics_test: pd.DataFrame,
-    df_meta_weights: pd.DataFrame,
+    merged: MergedPredictions,
+    eval_result: MetaEvaluationResult,
+    df_tier_counts: pd.DataFrame,
     best_params_log: dict[str, dict],
-) -> None:
-    """Save all result CSV/Parquet files, update results/README.md, and log to MLflow."""
-    config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    df_tier_counts = compute_tier_counts_table(
-        splits_dict={"train": data.X_train_raw, "valid": valid_df, "test": test_df},
-        p_low=data.p_low,
-        p_high=data.p_high,
-    )
-    df_table_tiers = build_table_tiers(df_metrics_test)
-
-    df_metrics_test.to_csv(config.METRICS_TEST_PATH, index=False)
-    df_metrics_valid.to_csv(config.METRICS_VALID_PATH, index=False)
-    valid_df.to_parquet(config.PREDS_VALID_PATH, index=False)
-    test_df.to_parquet(config.PREDS_TEST_PATH, index=False)
-    df_meta_weights.to_csv(config.META_WEIGHTS_PATH, index=False)
-    df_tier_counts.to_csv(config.TIER_COUNTS_PATH, index=False)
-    df_table_tiers.to_csv(config.TABLE_TIERS_PATH, index=False, float_format="%.2f")
-
+) -> str:
     tc_train = df_tier_counts[df_tier_counts["split"] == "train"].iloc[0]
     tc_valid = df_tier_counts[df_tier_counts["split"] == "valid"].iloc[0]
     tc_test = df_tier_counts[df_tier_counts["split"] == "test"].iloc[0]
-    n_test_gws = int(test_df["gw"].nunique())
+    n_test_gws = int(merged.test_df["gw"].nunique())
 
     nb_default = get_family("negative.binomial")
     tw_default = get_family("tweedie")
@@ -1121,7 +1318,7 @@ def save_results(
         "| Model | Wariant | Poziom | $p$ | MSE | MAE | $R^2$ | Adj $R^2$ | FPLLoss | MSE budget | MSE mid | MSE premium | MAE budget | MAE mid | MAE premium |",
         "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for _, r in df_metrics_test.iterrows():
+    for _, r in eval_result.metrics_test.iterrows():
         metrics_md_lines.append(
             f"| `{r['model']}` | `{r['variant']}` | `{r['level']}` | {int(r['p'])} | "
             f"{r['mse']:.4f} | {r['mae']:.4f} | {r['r2']:.4f} | {r['adj_r2']:.4f} | {r['fplloss']:.4f} | "
@@ -1129,8 +1326,9 @@ def save_results(
             f"{r['mae@budget']:.4f} | {r['mae@mid']:.4f} | {r['mae@premium']:.4f} |"
         )
     metrics_md_table = "\n".join(metrics_md_lines)
+    p_low, p_high = data.weights.p_low, data.weights.p_high
 
-    readme_content = f"""# Eksperymenty Predykcji Punktów FPL — Modele Bazowe, FPLLoss i Meta-Modele
+    return f"""# Eksperymenty Predykcji Punktów FPL — Modele Bazowe, FPLLoss i Meta-Modele
 
 ## 1. Uruchomienie eksperymentu
 Cały potok eksperymentalny uruchamiany jest jednym poleceniem z katalogu głównego repozytorium:
@@ -1142,15 +1340,15 @@ PYTHONPATH=src python -m fpl_project.models.run_experiments
 Ziarno losowe zostało ustalone na `SEED = {config.SEED}` (`random.seed`, `np.random.seed`, `torch.manual_seed`, `torch.cuda.manual_seed_all`, `torch.backends.cudnn.deterministic = True`, `torch.backends.cudnn.benchmark = False`).
 
 ## 2. Podział danych i liczebności grup cenowych (`tier_counts.csv`)
-- **Train (`2022/23`, `2023/24`, `2024/25`)**: `{len(data.X_train_raw)}` obserwacji (posortowanych globalnie po `(season, gw, code)`).
-  - Wewnętrzny chronologiczny zbiór wczesnego zatrzymania dla sieci (`MLP`, `Conv1D`): ostatnie 8 kolejek sezonu `2024/25` (`gw >= {config.NN_ES_MIN_GW}`, `{data.n_es_val}` obserwacji); trening właściwy sieci na wcześniejszych kolejkach (`{data.n_train_sub}` obserwacji).
-- **Valid (`2025/26`)**: `{len(valid_df)}` obserwacji.
-- **Test (`2026/27`, `is_played == True`)**: `{len(test_df)}` obserwacji (`{n_test_gws}` kolejek).
-- **Złączenie wewnętrzne (`inner join` po `(code, season, gw)`)**: `0` odrzuconych wierszy na `valid` oraz `0` na `test` (w `train_sub` dla `Conv1D` pominięto `{data.n_conv_warmup_dropped}` początkowych wierszy rozgrzewki okna `seq_len = {config.NN_SEQ_LEN}`).
+- **Train (`2022/23`, `2023/24`, `2024/25`)**: `{len(data.raw.X_train)}` obserwacji (posortowanych globalnie po `(season, gw, code)`).
+  - Wewnętrzny chronologiczny zbiór wczesnego zatrzymania dla sieci (`MLP`, `Conv1D`): ostatnie 8 kolejek sezonu `2024/25` (`gw >= {config.NN_ES_MIN_GW}`, `{data.mlp_bundle.n_es_val}` obserwacji); trening właściwy sieci na wcześniejszych kolejkach (`{data.mlp_bundle.n_train_sub}` obserwacji).
+- **Valid (`2025/26`)**: `{len(merged.valid_df)}` obserwacji.
+- **Test (`2026/27`, `is_played == True`)**: `{len(merged.test_df)}` obserwacji (`{n_test_gws}` kolejek).
+- **Złączenie wewnętrzne (`inner join` po `(code, season, gw)`)**: `0` odrzuconych wierszy na `valid` oraz `0` na `test` (w `train_sub` dla `Conv1D` pominięto `{data.conv_bundle.n_warmup_dropped}` początkowych wierszy rozgrzewki okna `seq_len = {config.NN_SEQ_LEN}`).
 
-Progi cenowe na zbiorze `train`: $p_{{\\text{{low}}}} = {data.p_low:.4f}$ mln £ (kwantyl `{config.PRICE_QUANTILE_LOW:.2f}`), $p_{{\\text{{high}}}} = {data.p_high:.4f}$ mln £ (kwantyl `{config.PRICE_QUANTILE_HIGH:.3f}`).
+Progi cenowe na zbiorze `train`: $p_{{\\text{{low}}}} = {p_low:.4f}$ mln £ (kwantyl `{config.PRICE_QUANTILE_LOW:.2f}`), $p_{{\\text{{high}}}} = {p_high:.4f}$ mln £ (kwantyl `{config.PRICE_QUANTILE_HIGH:.3f}`).
 
-| Zbiór (`split`) | `budget` ($< {data.p_low:.2f}$) | `mid` ($[{data.p_low:.2f}, {data.p_high:.3f})$) | `premium` ($\\ge {data.p_high:.3f}$) | Razem (`total`) |
+| Zbiór (`split`) | `budget` ($< {p_low:.2f}$) | `mid` ($[{p_low:.2f}, {p_high:.3f})$) | `premium` ($\\ge {p_high:.3f}$) | Razem (`total`) |
 | :--- | ---: | ---: | ---: | ---: |
 | `train` | {int(tc_train['budget'])} | {int(tc_train['mid'])} | {int(tc_train['premium'])} | {int(tc_train['total'])} |
 | `valid` | {int(tc_valid['budget'])} | {int(tc_valid['mid'])} | {int(tc_valid['premium'])} | {int(tc_valid['total'])} |
@@ -1200,11 +1398,43 @@ Ponieważ wagi $w_i$ nie są dzielone przez stałą normalizującą, wartości `
 - `preds_valid.parquet`, `preds_test.parquet` — predykcje wszystkich modeli na zbiorze walidacyjnym i testowym,
 - `experiment_run.log` — pełny zapis przebiegu eksperymentu.
 """
+
+
+def save_results(
+    data: PreparedData,
+    merged: MergedPredictions,
+    eval_result: MetaEvaluationResult,
+    best_params_log: dict[str, dict],
+) -> None:
+    """Save all result CSV/Parquet files, update results/README.md, and log to MLflow."""
+    config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    df_tier_counts = compute_tier_counts_table(
+        splits_dict={"train": data.raw.X_train, "valid": merged.valid_df, "test": merged.test_df},
+        p_low=data.weights.p_low,
+        p_high=data.weights.p_high,
+    )
+    df_table_tiers = build_table_tiers(eval_result.metrics_test)
+
+    eval_result.metrics_test.to_csv(config.METRICS_TEST_PATH, index=False)
+    eval_result.metrics_valid.to_csv(config.METRICS_VALID_PATH, index=False)
+    merged.valid_df.to_parquet(config.PREDS_VALID_PATH, index=False)
+    merged.test_df.to_parquet(config.PREDS_TEST_PATH, index=False)
+    eval_result.meta_weights.to_csv(config.META_WEIGHTS_PATH, index=False)
+    df_tier_counts.to_csv(config.TIER_COUNTS_PATH, index=False)
+    df_table_tiers.to_csv(config.TABLE_TIERS_PATH, index=False, float_format="%.2f")
+
+    readme_content = _render_results_readme(
+        data=data,
+        merged=merged,
+        eval_result=eval_result,
+        df_tier_counts=df_tier_counts,
+        best_params_log=best_params_log,
+    )
     config.RESULTS_README_PATH.write_text(readme_content, encoding="utf-8")
 
     log_results_to_mlflow(
-        df_metrics_valid=df_metrics_valid,
-        df_metrics_test=df_metrics_test,
+        eval_result=eval_result,
         best_params_log=best_params_log,
         data=data,
         artifact_paths=[
@@ -1228,7 +1458,7 @@ Ponieważ wagi $w_i$ nie są dzielone przez stałą normalizującą, wartości `
     print("=" * 115)
     pd.set_option("display.max_columns", 20)
     pd.set_option("display.width", 160)
-    print(df_metrics_test.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    print(eval_result.metrics_test.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
     print("=" * 115)
 
 
@@ -1242,22 +1472,21 @@ def main() -> None:
     print(f"Urządzenie obliczeniowe: {device} | Ziarno losowe (SEED): {config.SEED}")
 
     data = load_data()
-    tab_val_preds, tab_test_preds, best_params_log = tune_tabular_models(data, device)
-    nn_val_preds, nn_test_preds = train_neural_networks(data, device)
+    tab_result = tune_tabular_models(data, device)
+    nn_preds = train_neural_networks(data, device)
 
-    preds_valid = {**tab_val_preds, **nn_val_preds}
-    preds_test = {**tab_test_preds, **nn_test_preds}
+    combined_preds = PredictionSplit(
+        valid={**tab_result.predictions.valid, **nn_preds.valid},
+        test={**tab_result.predictions.test, **nn_preds.test},
+    )
 
-    valid_df, test_df = merge_base_predictions(data, preds_valid, preds_test)
-    df_metrics_valid, df_metrics_test, df_meta_weights = fit_meta_models(data, valid_df, test_df)
+    merged = merge_base_predictions(data, combined_preds)
+    eval_result = fit_meta_models(data, merged)
     save_results(
         data=data,
-        valid_df=valid_df,
-        test_df=test_df,
-        df_metrics_valid=df_metrics_valid,
-        df_metrics_test=df_metrics_test,
-        df_meta_weights=df_meta_weights,
-        best_params_log=best_params_log,
+        merged=merged,
+        eval_result=eval_result,
+        best_params_log=tab_result.best_params,
     )
     print(f"Czas całkowity wykonania eksperymentu: {time.time() - total_start:.2f} s")
 
